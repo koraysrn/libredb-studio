@@ -23,18 +23,28 @@ if it only lists the good news.
 
 ## Contents
 
-- [The short version](#the-short-version)
-- [Where a request goes](#where-a-request-goes)
-- [When nothing leaves at all](#when-nothing-leaves-at-all)
-- [One agent run, message by message](#one-agent-run-message-by-message)
-- [What comes back, and what is done with it](#what-comes-back-and-what-is-done-with-it)
-- [What #352 added to the boundary](#what-352-added-to-the-boundary)
-- [The fence, and what it does not do](#the-fence-and-what-it-does-not-do)
-- [B29: the open unfenced path](#b29-the-open-unfenced-path)
-- [How much can leave](#how-much-can-leave)
-- [What never leaves](#what-never-leaves)
-- [The other AI surfaces](#the-other-ai-surfaces)
-- [Where prompts do not go](#where-prompts-do-not-go)
+- [What leaves the machine](#what-leaves-the-machine)
+  - [Contents](#contents)
+  - [The short version](#the-short-version)
+  - [Where a request goes](#where-a-request-goes)
+  - [When nothing leaves at all](#when-nothing-leaves-at-all)
+  - [One agent run, message by message](#one-agent-run-message-by-message)
+    - [1. The system instructions — server text only](#1-the-system-instructions--server-text-only)
+    - [2. Your objective, verbatim](#2-your-objective-verbatim)
+    - [3. The schema inventory — identifiers and types, fenced](#3-the-schema-inventory--identifiers-and-types-fenced)
+    - [4. The relations block — identifiers only, quoted and escaped](#4-the-relations-block--identifiers-only-quoted-and-escaped)
+    - [5. Each tool result](#5-each-tool-result)
+    - [5a. The operations workflow: what a curated reading sends](#5a-the-operations-workflow-what-a-curated-reading-sends)
+    - [6. On a resumed run, what the ledger already holds](#6-on-a-resumed-run-what-the-ledger-already-holds)
+  - [What comes back, and what is done with it](#what-comes-back-and-what-is-done-with-it)
+  - [What #352 added to the boundary](#what-352-added-to-the-boundary)
+  - [The fence, and what it does not do](#the-fence-and-what-it-does-not-do)
+  - [B29: the open unfenced path](#b29-the-open-unfenced-path)
+  - [How much can leave](#how-much-can-leave)
+  - [What never leaves](#what-never-leaves)
+  - [Where prompts do not go](#where-prompts-do-not-go)
+  - [The other AI surfaces](#the-other-ai-surfaces)
+  - [Verifying this page yourself](#verifying-this-page-yourself)
 
 ---
 
@@ -43,7 +53,7 @@ if it only lists the good news.
 | Surface | What it sends | Fenced? |
 | --- | --- | --- |
 | An **agent run** | Your objective; the schema inventory (table, column, index identifiers and column types); the relations graph (identifiers only); the rows of each read the model performed, up to 200 per read; engine error text; server-written refusals; server-minted ids | Everything derived from the database is wrapped in an untrusted-content fence before it reaches a prompt |
-| An **agent run opened as Operate** | Your objective; **no schema inventory and no relations graph** (a server note replaces them); and the rows of each curated reading — which, for the `sessions` and `slow-queries` kinds, include **other database users' in-flight statement text and their database usernames**. See [the operations workflow](#5a-the-operations-workflow-what-a-curated-reading-sends) | Same fence: every reading's rows are database content and are fenced |
+| An **agent run opened as Operate** | Your objective; **a table-and-index inventory** (names only, no column types and no relations graph); and the rows of each curated reading — which, for the `sessions` and `slow-queries` kinds, include **other database users' in-flight statement text and their database usernames**. See [the operations workflow](#5a-the-operations-workflow-what-a-curated-reading-sends) | Same fence: the inventory and every reading's rows are database content and are fenced |
 | `POST /api/ai/explain` | Your statement, the EXPLAIN plan, the schema context the browser holds, the engine type | No |
 | `POST /api/ai/query-safety` | Your statement, a filtered schema context, the engine type | No |
 | `POST /api/ai/describe-schema` | A schema context. From the **Data Profiler** that context includes a per-column `min=` and `max=`, which are **real column values** | No |
@@ -138,10 +148,12 @@ The first user message is the text you typed, unmodified apart from the trim the
 
 ### 3. The schema inventory — identifiers and types, fenced
 
-**Not on an Operate run.** A run whose workflow is `operations` captures no inventory at all and is
-sent a server-written note in its place (`OPERATIONS_CONTEXT_NOTE`, `investigation.ts`), so sections
-3 and 4 below do not happen and no catalog is read. That is a decision rather than a gap: the
-workflow is offered no tool that reads a catalog, and most of the engines it runs on cannot serve one.
+**Smaller on an Operate run.** A run whose workflow is `operations` captures the same catalog as any
+other workflow, but packs only the table and index **names** — no column types and no relations graph
+(`packOperationsInventory`, `src/lib/agent/context-snapshot.ts`). On an engine the catalog composer
+does not serve (anything but PostgreSQL and SQLite), no catalog is read and a server-written note
+(`OPERATIONS_UNGROUNDED_NOTE` / `PLANNING_OPERATIONS_UNGROUNDED_NOTE`, `investigation.ts`) says so;
+the run still works, because `inspect_operations` reaches every provider.
 
 On every other workflow, captured once per run by reading the catalog, then packed for the task
 (`packContextForTask`, `src/lib/agent/context-snapshot.ts:466-505`). Per table it renders

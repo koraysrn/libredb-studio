@@ -708,20 +708,19 @@ describe("planning mode runs no statement of the user's", () => {
   });
 
   /*
-    The one workflow a plan run is NOT grounded for, and the one place that is a
-    decision rather than a shortfall. An operations objective is about what the engine
-    reports about itself — sessions, locks, waits, configuration — so a catalog read
-    would spend the run's statements on an inventory the plan has no use for. The
-    grounding design of 2026-08-15 lists `operations` as the row whose plan deliverable
-    stays prose for exactly this reason.
+    The one workflow whose plan deliverable stays prose, and why it is now grounded
+    anyway: an operations objective is about what the engine reports about itself, but
+    those reports are full of schema identifiers — locks on tables, slow queries naming
+    relations, index readings by name — so the plan is handed the table and index NAMES
+    without column types or the relations graph.
 
-    Its sentence is its own rather than the agent mode's, because
-    `OPERATIONS_CONTEXT_NOTE` tells the model to take readings with `inspect_operations`
-    and a planning run has no tools at all: naming one it does not have is the #350
-    failure. Both halves are asserted, since the note being merely PRESENT would pass
-    just as well with the wrong one of the two.
+    Its sentence is its own rather than the agent mode's, because the agent note tells
+    the model to take readings with `inspect_operations` and a planning run has no
+    tools at all: naming one it does not have is the #350 failure. Both halves are
+    asserted, since the note being merely PRESENT would pass just as well with the
+    wrong one of the two.
   */
-  test("an operations plan is given its own note, reads no catalog, and is told of no tool", async () => {
+  test("an operations plan is grounded with names, told of no tool, and reads only the catalog", async () => {
     const b = boot(freshDataDir());
     const run = await startRun(b, "planning", "operations");
     const script = scriptedModel(answersProse("I would read the wait events."));
@@ -732,19 +731,16 @@ describe("planning mode runs no statement of the user's", () => {
       resources: b.resources,
     });
 
-    expect(script.turns[0]?.transcript).toContain(
-      "an operations objective is about what the engine reports about ITSELF",
-    );
+    expect(script.turns[0]?.transcript).toContain("inventory of table and index names");
     expect(script.turns[0]?.transcript).not.toContain("inspect_operations");
     expect(script.turns[0]?.body.tools).toBeUndefined();
-    // Not grounded, and not partially grounded either: no statement of any kind was
-    // sent, so neither the catalog nor the statistics were read.
-    expect(b.queryReadOnly).not.toHaveBeenCalled();
-    expect(b.acquireProvider).not.toHaveBeenCalled();
-    expect(kindsOf(await eventsOf(b.store, run.runId))).not.toContain("context-captured");
-    // And the rules say it has seen nothing, rather than pointing at an inventory
-    // that was never read.
-    expect(rulesOfTurn(script.turns[0] as Turn)).toContain("No schema inventory is available to this run");
+    // Grounded, but only by the server's own catalog reads: the model sent none.
+    expect(userStatements(b.queryReadOnly)).toEqual([]);
+    expect(kindsOf(await eventsOf(b.store, run.runId))).toContain("context-captured");
+    // And the rules point at the inventory that was actually read.
+    expect(rulesOfTurn(script.turns[0] as Turn)).toContain(
+      "A schema inventory of table and index names is in this conversation",
+    );
     expect(result.status).toBe("succeeded");
   });
 
@@ -1203,15 +1199,16 @@ describe("planning mode runs no statement of the user's", () => {
     test("an operations plan is not given the statement contract at all", async () => {
       const rules = await planRulesFor("operations");
 
-      // The one row of the design's deliverable table that is prose, and it is a
-      // decision rather than a shortfall: an operations objective is about what the
-      // engine reports about itself, so there is no schema to write a statement
-      // against and no statement to write.
+      // The one row of the design's deliverable table that is prose. An operations
+      // objective names objects rather than writes SQL, so the run is told to name
+      // the real tables and indexes it was shown instead of drafting a statement.
       expect(rules).toContain("There is no statement to write here");
       expect(rules).not.toContain("Produce ONE runnable statement");
       expect(rules).not.toContain("NO STATEMENT:");
-      // And it still knows it has no inventory, which is what stops it inventing one.
-      expect(rules).toContain("No schema inventory is available to this run");
+      // Grounded like every other workflow now, so it is told it has an inventory of
+      // names rather than told it has seen nothing.
+      expect(rules).toContain("A schema inventory of table and index names is in this conversation");
+      expect(rules).toContain("Name the real tables and indexes");
     });
 
     /*
@@ -2631,5 +2628,130 @@ describe("the handover an answer records comes from the run's own setting", () =
     const transcript = (script.turns.at(-1) as Turn).transcript;
     expect(transcript).toContain("This run has already recorded its answer");
     expect(transcript).toContain("compose_report");
+  });
+});
+
+/**
+ * The operations workflow's grounding (#407 follow-up): it is handed a table-and-
+ * index inventory like every other workflow, and the opening note must say what the
+ * run actually has — never promise an inventory it was not sent, and never name a
+ * tool the mode does not have (#350).
+ */
+describe("an operations run is grounded with table and index names", () => {
+  /** A catalog with two tables, one of them indexed, so the inventory has real names. */
+  const catalog = async (sql: string): Promise<QueryResult> => {
+    if (sql.includes("information_schema.columns")) {
+      return queryResult({
+        rows: [
+          { table_schema: "public", table_name: "orders", column_name: "id", data_type: "integer" },
+          { table_schema: "public", table_name: "orders", column_name: "total", data_type: "numeric" },
+          { table_schema: "public", table_name: "customers", column_name: "id", data_type: "integer" },
+        ],
+        fields: ["table_schema", "table_name", "column_name", "data_type"],
+        rowCount: 3,
+      });
+    }
+    if (sql.includes("pg_index")) {
+      return queryResult({
+        rows: [
+          {
+            table_schema: "public",
+            table_name: "orders",
+            index_name: "orders_customer_idx",
+            is_unique: false,
+            is_primary: false,
+            column_name: "total",
+          },
+        ],
+        fields: ["table_schema", "table_name", "index_name", "is_unique", "is_primary", "column_name"],
+        rowCount: 1,
+      });
+    }
+    return queryResult({ rows: [], fields: [], rowCount: 0 });
+  };
+
+  const userTextsOf = (script: ReturnType<typeof scriptedModel>): string => {
+    const messages = (script.turns[0]?.body.messages ?? []) as { role?: string; content?: unknown }[];
+    return messages
+      .filter((message) => message.role === "user")
+      .map((message) => String(message.content))
+      .join("\n");
+  };
+
+  test("a plan-mode operations run is handed the inventory, and its note agrees with it", async () => {
+    const b = boot(freshDataDir(), { answer: catalog });
+    const run = await startRun(b, "planning", "operations");
+    const script = scriptedModel(answersProse("I would read table-stats, then index-stats."));
+
+    await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    const texts = userTextsOf(script);
+    // The note says what the run actually has, and the inventory it names is beside it.
+    expect(texts).toContain("inventory of table and index names");
+    expect(texts).toContain("public.orders");
+    expect(texts).toContain("orders_customer_idx");
+    // A planning run has no tool, so the note must not promise one (#350).
+    expect(texts).not.toContain("inspect_operations");
+  });
+
+  test("an agent-mode operations run is told the same thing, with its tool named", async () => {
+    const b = boot(freshDataDir(), { answer: catalog });
+    const run = await startRun(b, "agent", "operations");
+    const script = scriptedModel(answersProse("I would read the sessions."));
+
+    await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    const texts = userTextsOf(script);
+    expect(texts).toContain("inspect_operations");
+    expect(texts).toContain("public.orders");
+  });
+
+  test("on an unserved engine the note says there is no inventory, and none is sent", async () => {
+    const b = boot(freshDataDir(), { answer: catalog });
+    const run = await startRun(b, "planning", "operations");
+    const script = scriptedModel(answersProse("I would read what the engine reports about itself."));
+
+    await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: { ...b.resources, connection: { ...CONNECTION, type: "mongodb" } },
+    });
+
+    const texts = userTextsOf(script);
+    expect(texts).toContain("No schema inventory was read");
+    expect(texts).not.toContain("public.orders");
+  });
+
+  test("a second operations run on the same connection reuses the held inventory", async () => {
+    const b = boot(freshDataDir(), { answer: catalog });
+    const firstRun = await startRun(b, "agent", "operations");
+    const firstScript = scriptedModel(answersProse("first pass"));
+    await runInvestigation(firstRun.runId, {
+      service: b.service,
+      model: await modelOver(firstScript.fetch),
+      resources: b.resources,
+    });
+
+    // The first run captured and held the inventory; a second run on the same
+    // connection reuses it and performs no catalog read of its own.
+    const secondRun = await startRun(b, "agent", "operations");
+    const secondScript = scriptedModel(answersProse("second pass"));
+    const readsBefore = b.queryReadOnly.mock.calls.length;
+    await runInvestigation(secondRun.runId, {
+      service: b.service,
+      model: await modelOver(secondScript.fetch),
+      resources: b.resources,
+    });
+
+    expect(b.queryReadOnly.mock.calls.length).toBe(readsBefore);
+    expect(secondScript.turns[0]?.transcript).toContain("public.orders");
   });
 });

@@ -51,6 +51,7 @@ import {
   heldSnapshotForConnection,
   holdSnapshotForConnection,
   packContextForTask,
+  packOperationsInventory,
   reusableSnapshot,
 } from "./context-snapshot";
 import { erDetailForWorkflow, renderErDiagram } from "./er-diagram";
@@ -233,25 +234,44 @@ export const AGENT_REPORT_RESERVE_NOTICE = [
 ].join(" ");
 
 /**
- * What an operations run is given instead of a schema inventory.
+ * What an operations run is told when it HAS a table-and-index inventory.
  *
  * Server-authored and unfenced, like the other opening messages: nothing a database
- * wrote is in it.
+ * wrote is in it. The inventory itself arrives as its own fenced message beside this
+ * one, which is why the note names it without restating its contents.
  */
 const OPERATIONS_CONTEXT_NOTE =
-  "No schema inventory was captured for this run, and none is needed: this run reads what the engine reports about itself, not what its tables contain. Take the readings you need with inspect_operations. There is no tool here that sends SQL, so nothing is established for you until a reading returns it.";
+  "A schema inventory of table and index names was captured for this run, and it is in this conversation. Use it to read the names inside an inspect_operations reading as real objects: which table a lock is on, which relation a slow query names, which index a reading reports. There is no tool here that sends SQL, so nothing further is established until a reading returns it. Take the readings you need with inspect_operations.";
 
 /**
  * The same workflow, planned rather than run.
  *
  * Its own sentence because `OPERATIONS_CONTEXT_NOTE` names `inspect_operations`, and
  * a planning run has no tools: telling a model to call a tool it does not have is the
- * #350 failure exactly. This is also why an operations plan is not grounded at all —
- * an operations objective is not about the schema, so a catalog read would spend the
- * run's statements on an inventory the plan has no use for.
+ * #350 failure exactly. The plan is now grounded the same way an agent run is — the
+ * server reads the catalog before the first turn — but the run still holds no tool,
+ * so the note names the inventory without naming a tool to read more of it.
  */
 const PLANNING_OPERATIONS_CONTEXT_NOTE =
-  "No schema inventory was read for this run, and none is needed: an operations objective is about what the engine reports about ITSELF — its sessions, its locks, its waits, its configuration — not about what its tables contain. Nothing about this server has been established for you, so write the plan as the readings you would take and what each would settle.";
+  "A schema inventory of table and index names was read for this run, and it is in this conversation. Write the plan as the readings you would take and what each would settle, naming the real tables and indexes those readings would inspect. You have no tools: nothing further will be read for you.";
+
+/**
+ * What an operations run is told when NO inventory could be captured.
+ *
+ * The catalog reads are served for PostgreSQL and SQLite only; on any other engine
+ * an operations run still works — `inspect_operations` reaches every provider — but
+ * it starts with no names to resolve the reading's identifiers against, and must be
+ * told so rather than left to assume. Agent mode.
+ */
+const OPERATIONS_UNGROUNDED_NOTE =
+  "No schema inventory was captured for this run on this connection, so the names inside a reading will reach you exactly as the engine reported them. Take the readings you need with inspect_operations, and do not claim to know which object a name refers to beyond what the reading itself says.";
+
+/**
+ * The same ungrounded state, planned rather than run: no tools, so the sentence
+ * cannot name `inspect_operations` (#350).
+ */
+const PLANNING_OPERATIONS_UNGROUNDED_NOTE =
+  "No schema inventory was read for this run on this connection, so nothing about this server has been established for you: not its tables and not its indexes. Write the plan as the readings you would take and what each would settle, and name no table or index you were not shown.";
 
 /**
  * What a plan run is told when its context could not be established.
@@ -469,11 +489,21 @@ const planningNoSchemaRules = (deliverable: { readonly noun: string }): string =
  * What an operations plan is told instead of the statement contract.
  *
  * The prose row of the deliverable table, and the reason it is a row rather than a
- * silence: this workflow composes no SQL and is grounded with no schema, so a run of
- * it must be told what it IS to produce, not merely left without the contract the
- * other four are given.
+ * silence: this workflow composes no SQL, so a run of it must be told what it IS to
+ * produce, not merely left without the contract the other four are given.
+ *
+ * Now grounding-aware, for the reason the schema side already was: a plan handed
+ * real names must be told to use them, and one handed none must be told not to
+ * invent them. Both halves end in the same instruction — write the readings, say
+ * what each settles — because that deliverable does not change with grounding.
  */
-const PLANNING_PROSE_RULES = [
+const PLANNING_PROSE_RULES_GROUNDED = [
+  "A schema inventory of table and index names is in this conversation. This objective is about what the engine reports about ITSELF — its sessions, its locks, its waits, its configuration — and those reports name the objects the inventory shows.",
+  "There is no statement to write here and no fenced block to produce.",
+  "Answer in prose: the readings you would take, in what order, and what each one would settle. Name the real tables and indexes those readings would inspect instead of writing about tables in general.",
+].join(" ");
+
+const PLANNING_PROSE_RULES_UNGROUNDED = [
   "No schema inventory is available to this run, and this objective needs none: it is about what the engine reports about ITSELF — its sessions, its locks, its waits, its configuration — not about what its tables contain.",
   "There is no statement to write here and no fenced block to produce, and you must invent no table or column names.",
   "Answer in prose: the readings you would take, in what order, and what each one would settle.",
@@ -532,7 +562,7 @@ const WORKFLOW_TOOL_RULES: Readonly<Record<AgentRunWorkflowType, string>> = Obje
     "Grade what you find against completeness, uniqueness, consistency and validity, and say which of the four each finding speaks to.",
   ].join(" "),
   operations: [
-    "You have NO SQL in this run: there is no inspect_schema, no run_read_query and no inspect_plan, and no schema inventory was captured for you. Everything you can read, you read with inspect_operations.",
+    "You have NO SQL in this run: there is no inspect_schema, no run_read_query and no inspect_plan. A schema inventory of table and index names is in this conversation; everything you can READ, you read with inspect_operations.",
     "Take the readings your objective needs — sessions, slow-queries, table-stats, index-stats, storage, health — one call each, and narrow them with limit or schema rather than asking for everything.",
     // The verifier's rule, in the model's own terms. A rule the model is never told is
     // a rule live runs fail (#350, #356), so the bar and its honest exception are both
@@ -604,18 +634,21 @@ const AUTO_EXECUTE_RULE = [
  * The rules, given what this drive was able to give the run.
  *
  * `schemaKnown` bears on planning alone: agent mode already tells the model about a
- * missing inventory in the capture's own words (`FALLBACK_ADVICE`), and its rules
- * are about the tools either way.
+ * missing inventory in the capture's own words, and its rules are about the tools
+ * either way. The prose workflow (operations) is now grounded when a catalog read
+ * succeeds, so its rules branch on the same flag as the statement workflows' do.
  */
 function systemPrompt(record: AgentRunRecord, grounding: PlanningGrounding, type: DatabaseType): string {
   // The deliverable decides the branch BEFORE the grounding does, because the prose
-  // workflow is not ungrounded by accident: `establishContext` skips the capture for
-  // it deliberately, so telling it what a run without an inventory should do would
-  // describe a shortfall it does not have.
+  // workflow's deliverable does not change with grounding: grounded or not, an
+  // operations plan is a list of readings, never a statement. What changes is only
+  // whether it may name real objects.
   const deliverable = PLAN_DELIVERABLES[record.workflowType];
   const planningDeliverableRules =
     deliverable.kind === "prose"
-      ? PLANNING_PROSE_RULES
+      ? grounding.schemaKnown
+        ? PLANNING_PROSE_RULES_GROUNDED
+        : PLANNING_PROSE_RULES_UNGROUNDED
       : grounding.schemaKnown
         ? planningSchemaRules(grounding, deliverable, type)
         : planningNoSchemaRules(deliverable);
@@ -1174,6 +1207,59 @@ export async function runInvestigation(
   let planningInventory: readonly TableSchema[] | null = null;
 
   /**
+   * An operations run's grounding: the table-and-index names it needs to read the
+   * engine's own reports, from the same three sources every other workflow uses.
+   *
+   * The subset is `packOperationsInventory`'s — names only. A run that cannot be
+   * grounded is told so in the server's own voice and still runs: `inspect_operations`
+   * reaches every engine, so a missing catalog is a normal state here, not a failure.
+   * In plan mode the `grounding` flag is what decides which prose rules the run is
+   * told, so it is set on the capture path and the reuse paths alike, exactly as
+   * `establishPlanningContext` sets it.
+   */
+  const establishOperationsContext = async (): Promise<void> => {
+    const recorded = reusableSnapshot(record.events, record.connectionId);
+    const held = recorded === null ? heldSnapshotForConnection(connectionIdentity(context.connection)) : null;
+    const snapshot = recorded ?? held;
+    const readBy: PlanningGrounding["readBy"] = held === null ? "this-run" : "earlier-run";
+
+    if (snapshot === null) {
+      const capture = await captureContextSnapshot(context);
+      if (capture.kind === "unavailable") {
+        messages.push({
+          role: "user",
+          content: record.mode === "agent" ? OPERATIONS_UNGROUNDED_NOTE : PLANNING_OPERATIONS_UNGROUNDED_NOTE,
+        });
+        return;
+      }
+      await service.recordEvent(runId, {
+        kind: "context-captured",
+        fingerprint: capture.snapshot.fingerprint,
+        tableCount: capture.snapshot.tables.length,
+        snapshot: capture.snapshot,
+      });
+      holdSnapshotForConnection(capture.snapshot, connectionIdentity(context.connection));
+      messages.push({
+        role: "user",
+        content: record.mode === "agent" ? OPERATIONS_CONTEXT_NOTE : PLANNING_OPERATIONS_CONTEXT_NOTE,
+      });
+      messages.push({ role: "user", content: packOperationsInventory(capture.snapshot) });
+      if (record.mode !== "agent") grounding = { schemaKnown: true, readBy, statisticsShown: false };
+      return;
+    }
+
+    // Re-holding a reading that came from the hold moves the connection back to the
+    // newest end of the eviction order, the same reason the planning path re-holds it.
+    holdSnapshotForConnection(snapshot, connectionIdentity(context.connection));
+    messages.push({
+      role: "user",
+      content: record.mode === "agent" ? OPERATIONS_CONTEXT_NOTE : PLANNING_OPERATIONS_CONTEXT_NOTE,
+    });
+    messages.push({ role: "user", content: packOperationsInventory(snapshot) });
+    if (record.mode !== "agent") grounding = { schemaKnown: true, readBy, statisticsShown: false };
+  };
+
+  /**
    * A planning run's grounding: the inventory, its relations, and what the engine
    * estimates about its own tables.
    *
@@ -1268,15 +1354,16 @@ export async function runInvestigation(
   const establishContext = async (): Promise<void> => {
     contextEstablished = true;
 
-    // An operations run captures no schema inventory, and this is the one workflow
-    // where that is a decision rather than a failure: the objective is about what the
-    // engine reports about itself, not about what its tables hold. Hoisted above the
-    // mode branch since planning grounds itself, so that the decision is made once —
-    // the two modes differ only in which sentence they are given, because
-    // `OPERATIONS_CONTEXT_NOTE` names a tool a planning run does not have (#350).
+    // An operations run is now grounded like every other workflow, but with the
+    // subset an operations objective uses: table and index names, no column types
+    // and no relations graph. It is still the one workflow where a missing catalog
+    // is a normal state rather than a failure — `inspect_operations` works on every
+    // engine — so the ungrounded branch tells the run so and continues, exactly as
+    // before. Hoisted above the mode branch so the decision is made once; the two
+    // modes differ in which sentences they are given, because the agent note names
+    // a tool a planning run does not have (#350).
     if (record.workflowType === "operations") {
-      const note = record.mode === "agent" ? OPERATIONS_CONTEXT_NOTE : PLANNING_OPERATIONS_CONTEXT_NOTE;
-      messages.push({ role: "user", content: note });
+      await establishOperationsContext();
       return;
     }
 

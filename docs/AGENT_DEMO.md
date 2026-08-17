@@ -28,10 +28,12 @@ inferred from the code.
 **Read the table this way.** Plan mode opens on every engine — it runs no statement of yours on any
 of them — but it is only *grounded* (case 18) on PostgreSQL and SQLite, because only those two
 capture a schema inventory and the engine's own size estimates. Ungrounded, it has nothing to draft
-a statement against and says so instead. Operate reads what the engine reports about itself, so it needs no SQL and reaches
-everything. The other four workflows write SQL and need a database-native read-only statement path,
-which today only PostgreSQL and SQLite provide; everywhere else the run ends with *"The agent cannot
-run on this database engine: it offers no read-only execution profile."*
+a statement against and says so instead. Operate reads what the engine reports about itself, so it
+needs no SQL and reaches everything; on PostgreSQL and SQLite it is now also grounded before its
+first turn, handed the table and index names its readings will refer to. The other four workflows
+write SQL and need a database-native read-only statement path, which today only PostgreSQL and SQLite
+provide; everywhere else the run ends with *"The agent cannot run on this database engine: it offers
+no read-only execution profile."*
 
 The last row is honest rather than modest: those four implement the same provider interface the six
 above do, so the same rules should apply — but nobody has started a run on them, so they are not

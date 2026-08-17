@@ -20,15 +20,24 @@ needs the mechanism behind it, it links there instead of restating it.
 
 ## Contents
 
-- [Where the agent is](#where-the-agent-is)
-- [What a run is](#what-a-run-is)
-- [The four workflows](#the-four-workflows)
-- [What you see while a run goes](#what-you-see-while-a-run-goes)
-- [What "answered" means](#what-answered-means)
-- [The budget meter's numbers](#the-budget-meters-numbers)
-- [When the model is refused](#when-the-model-is-refused)
-- [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
-- [What the agent does not do](#what-the-agent-does-not-do)
+- [The agent, for the person using it](#the-agent-for-the-person-using-it)
+  - [Contents](#contents)
+  - [Where the agent is](#where-the-agent-is)
+  - [What a run is](#what-a-run-is)
+    - [What a Plan run knows about your database](#what-a-plan-run-knows-about-your-database)
+  - [The four workflows](#the-four-workflows)
+    - [Investigate](#investigate)
+    - [Optimize](#optimize)
+    - [Assess](#assess)
+    - [Operate](#operate)
+  - [What you see while a run goes](#what-you-see-while-a-run-goes)
+  - [Auto-execute: when the run runs the answer in your editor](#auto-execute-when-the-run-runs-the-answer-in-your-editor)
+  - [What "answered" means](#what-answered-means)
+  - [The budget meter's numbers](#the-budget-meters-numbers)
+  - [When the model is refused](#when-the-model-is-refused)
+  - [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
+    - [What was measured](#what-was-measured)
+  - [What the agent does not do](#what-the-agent-does-not-do)
 
 ---
 
@@ -146,9 +155,10 @@ having **no statistics**, never as empty. On SQLite the statistics exist only af
 
 **Two engines only.** Grounding works on **PostgreSQL and SQLite**. On any other connection a Plan
 run says plainly that no inventory could be read for it, and is asked to refuse rather than to invent
-table names. **Operate** is the one workflow with no grounding by choice, on any engine: it asks the
-engine about itself rather than about your tables, so there is nothing to ground against, and its
-plan is prose rather than a statement.
+table names. **Operate** is grounded too, but with a smaller subset: its objective is about what the
+engine reports about itself, and those reports are full of table and index names, so the run is
+handed those names — without column types or the relations graph. On the other engines it runs
+without an inventory and is told so; its plan is prose rather than a statement either way.
 
 **The statement it drafts, and what is checked.** The run finishes with one fenced statement and a
 short rationale. The rail shows it on its own card with a **Copy** and an **Apply to editor** — the
@@ -243,8 +253,11 @@ Two consequences you will notice:
 - **It runs on every engine.** The other workflows need a database-native read-only statement path,
   which only PostgreSQL and SQLite have; this one needs none, so a run opened on MySQL, Oracle, SQL
   Server, MongoDB or Redis works rather than ending `engine-unsupported`.
-- **It has no schema and no free-form SQL.** There is no `inspect_schema` and no `run_read_query`
-  here, and the run is told so in its opening message rather than being left to discover it.
+- **It has no column types and no free-form SQL.** There is no `inspect_schema` and no
+  `run_read_query` here, and the run is told so in its opening message rather than being left to
+  discover it. On PostgreSQL and SQLite it is handed the table and index names before its first turn,
+  so a reading's names — which table a lock is on, which index a reading reports — are real objects
+  rather than opaque strings.
 
 Two things this workflow will not do, and it says so rather than implying otherwise:
 

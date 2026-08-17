@@ -164,9 +164,14 @@ export type AgentRunFailureReason =
    * user chose, not a fault of the server — which is why it is not `internal`.
    *
    * WORKFLOW-CONDITIONAL since the `operations` workflow (#325): that workflow reads
-   * only the curated provider methods every engine implements, under its own
-   * execution profile, so it never asks for a read-only STATEMENT path and can never
-   * end this way. Every other workflow still can, and does, on the same connection.
+   * the curated provider methods every engine implements, under its own execution
+   * profile, so it never asks for a read-only STATEMENT path and can never end this
+   * way. Its run-start grounding now reads the catalog where a catalog plan exists
+   * (PostgreSQL, SQLite), but that grounding is the run's own context rather than a
+   * tool the model drives: when the read cannot be served the capture reports
+   * "unavailable" and the run continues, so a failed grounding still does not end
+   * the drive this way. Every other workflow still can, and does, on the same
+   * connection.
    */
   | "engine-unsupported"
   /** The run's persisted connection no longer resolves on the server. */

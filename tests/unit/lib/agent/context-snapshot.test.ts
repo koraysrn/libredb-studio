@@ -7,6 +7,7 @@ import {
   heldSnapshotForConnection,
   holdSnapshotForConnection,
   packContextForTask,
+  packOperationsInventory,
   reusableSnapshot,
 } from "@/lib/agent/context-snapshot";
 import { AgentRunDeadline } from "@/lib/agent/deadline";
@@ -872,5 +873,55 @@ describe("the identity a held inventory is filed under", () => {
 
     expect(heldSnapshotForConnection(repointed({ database: "staging" }))).toBeNull();
     expect(heldSnapshotForConnection(connectionIdentity(CONNECTION))).toEqual(snapshot);
+  });
+});
+
+/**
+ * The subset of the inventory an operations run is handed, and the boundary it is
+ * held to. The full inventory carries column types and relations; an operations
+ * objective names OBJECTS — which table a lock is on, which index a reading reports —
+ * so this pack carries names only, fenced like every other piece of database content.
+ */
+describe("packOperationsInventory", () => {
+  test("is fenced as database content, with its own label", async () => {
+    const packed = packOperationsInventory(await captured("postgres"));
+
+    expect(packed).toContain(UNTRUSTED_CONTENT_BEGIN);
+    expect(packed).toContain(UNTRUSTED_CONTENT_END);
+    expect(packed).toContain("operations schema inventory");
+  });
+
+  test("carries table and index names, and no column types or foreign keys", async () => {
+    const packed = packOperationsInventory(await captured("postgres"));
+
+    expect(packed).toContain("public.orders");
+    expect(packed).toContain("orders_customer_idx");
+    expect(packed).toContain("public.customers");
+    // The full inventory's column types and relation detail are exactly what this
+    // subset exists to leave out.
+    expect(packed).not.toContain("integer");
+    expect(packed).not.toContain("referenced");
+  });
+
+  test("an empty inventory says so rather than implying a silent omission", async () => {
+    const snapshot = await captured("postgres");
+    const packed = packOperationsInventory({ ...snapshot, tables: [] });
+
+    expect(packed).toContain("This database reported no tables.");
+  });
+
+  test("tables that do not fit the bound are named as omitted, not silently dropped", async () => {
+    // A bound too small to hold both table lines. The header itself still goes out,
+    // because dropping the envelope would be a bigger lie than a long header; what
+    // must never happen is a table list that looks complete while lines are missing.
+    const packed = packOperationsInventory(await captured("postgres"), { maxChars: 120 });
+
+    expect(packed).toContain("further table(s) omitted");
+  });
+
+  test("a preface is server prose placed before the fence, not inside it", async () => {
+    const packed = packOperationsInventory(await captured("postgres"), { preface: "SERVER SAYS" });
+
+    expect(packed.indexOf("SERVER SAYS")).toBeLessThan(packed.indexOf(UNTRUSTED_CONTENT_BEGIN));
   });
 });

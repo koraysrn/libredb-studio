@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { type EvalEngine, type EvalRun, openEvalRun } from "../isolated/fixtures/agent-eval-harness";
 import { type Turn, answersProse, callsTool, reportOn } from "../isolated/fixtures/agent-scripted-model";
+import { forgetHeldSnapshots } from "@/lib/agent/context-snapshot";
 import { QueryError } from "@/lib/db/errors";
 
 /**
@@ -21,6 +22,10 @@ let consoleSpy: ReturnType<typeof spyOn<Console, "log">>;
 
 beforeEach(() => {
   consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+  // An operations run now captures and holds a table-and-index inventory on the two
+  // grounded engines, so every test starts cold — otherwise the second drive on the
+  // same engine would reuse the first test's held reading and never reach a catalog.
+  forgetHeldSnapshots();
 });
 
 afterEach(() => {
@@ -51,23 +56,35 @@ describe("the operations arc, on every engine including one agent mode otherwise
 
       const drive = await run.drive(operationsArc);
 
-      // No `context-captured` on ANY engine: an operations run captures no schema
-      // inventory, deliberately, because it has no tool that could read one and most
-      // of the engines it runs on cannot serve one at all.
-      expect(drive.kinds).toEqual(["run-started", "tool-invoked", "tool-completed", "report-composed", "run-finished"]);
+      // A grounded engine captures the table-and-index inventory before the first
+      // turn; the unserved one captures nothing and still runs.
+      const captured = engine === "mysql" ? [] : ["context-captured"];
+      expect(drive.kinds).toEqual([
+        "run-started",
+        ...captured,
+        "tool-invoked",
+        "tool-completed",
+        "report-composed",
+        "run-finished",
+      ]);
       expect(drive.verdict).toEqual({ outcome: "answered", verifier: "agent-operations.1", unmet: [] });
     });
 
-    test(`${engine}: the run sends NO statement to the database at all`, async () => {
-      // The property the whole workflow rests on. Asserted over the statements that
-      // reached the engine rather than over the tool set, because a tool added to
-      // this workflow later would pass a tool-set assertion and fail this one.
+    test(`${engine}: the MODEL sends no statement, whatever the server reads to ground it`, async () => {
+      // The property the whole workflow rests on, asserted over the statements the
+      // MODEL asked for rather than over the tool set, because a tool added to this
+      // workflow later would pass a tool-set assertion and fail this one. The
+      // server's own grounding catalog reads are the only statements that reach a
+      // grounded engine; the unserved one gets none at all.
       const run = await open(engine);
 
       const drive = await run.drive(operationsArc);
 
-      expect(drive.statements).toEqual([]);
+      // The MODEL asks for none, on any engine. The server's own grounding catalog
+      // reads are the only statements that reach a grounded engine, and their count
+      // is exactly the preset's — three on PostgreSQL, two on SQLite, none on MySQL.
       expect(drive.modelStatements).toEqual([]);
+      expect(drive.statements.length).toBe(run.engine.catalogReads.length);
     });
   }
 });

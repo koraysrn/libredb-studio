@@ -602,6 +602,24 @@ function renderTable(table: TableSchema): string {
 }
 
 /**
+ * One table, for an operations run: its name and its index names, and nothing
+ * else. Column types and foreign keys are omitted because an operations objective
+ * names OBJECTS — which table a lock is on, which relation a slow query names,
+ * which index a reading reports — rather than what those tables contain.
+ *
+ * The index list is NOT truncated the way `renderTable` truncates it: an
+ * `index-stats` reading reports every index by name, and "which index is dead
+ * weight" is answered by matching a reading's name to one this inventory showed.
+ * The whole pack stays bounded by `packOperationsInventory`, which drops TABLE
+ * lines rather than silently halving an index list the model would then believe
+ * was complete.
+ */
+function renderOperationsTable(table: TableSchema): string {
+  const indexText = table.indexes.length === 0 ? "" : `; indexes: ${table.indexes.map((index) => index.name).join(", ")}`;
+  return `${table.name}${indexText}`;
+}
+
+/**
  * The part of the inventory this task is about, fenced for a prompt.
  *
  * Bounded by construction rather than by trimming afterwards: lines are added while
@@ -663,4 +681,60 @@ export function packContextForTask(
   }
 
   return `${lead}${fenceUntrustedContent(close(body, ranked.length - shown), source)}`;
+}
+
+/**
+ * The subset of the inventory an operations run is handed, fenced like the full one.
+ *
+ * The decision this rests on is the #350-shaped one: an operations objective is
+ * about what the engine reports about ITSELF — sessions, locks, waits, storage —
+ * but those reports are full of schema identifiers. A lock is held on a table, a
+ * slow query names a relation, storage is per-table, and an index reading reports
+ * indexes by name. A run that has never seen those names reads them as opaque
+ * strings; one that has, can connect a blocked session to the table the user asked
+ * about. What the workflow does NOT need is column types or foreign keys, so this
+ * pack carries names only — table names and the index names attached to each.
+ *
+ * The full inventory and this subset are both fenced as database content, by the
+ * same envelope and against the same bound. The relations graph is deliberately
+ * absent: it is the least useful part here and the most expensive to render.
+ */
+export function packOperationsInventory(
+  snapshot: AgentContextSnapshot,
+  options: { readonly maxChars?: number; readonly preface?: string } = {},
+): string {
+  const lead = options.preface === undefined ? "" : `${options.preface}\n`;
+  const maxChars = (options.maxChars ?? AGENT_CONTEXT_PACK_MAX_CHARS) - lead.length;
+  const source = {
+    label: "operations schema inventory",
+    operationId: "agent/context-snapshot",
+    reference: snapshot.fingerprint,
+  };
+
+  const header = `Operations schema inventory for this run — fingerprint ${snapshot.fingerprint}, ${snapshot.tables.length} table(s) read at epoch ${snapshot.capturedAtMs}ms and not re-read since. Table and index names only: column types and relations are omitted.`;
+  if (snapshot.tables.length === 0) {
+    return `${lead}${fenceUntrustedContent(`${header}\nThis database reported no tables.`, source)}`;
+  }
+
+  // Deterministic rather than task-ranked: an operations objective rarely names the
+  // table it is about, so a relevance sort would put an arbitrary table first. The
+  // bound is still kept by dropping whole table lines, never by halving an index
+  // list inside one.
+  const tables = [...snapshot.tables].sort((left, right) => (left.name < right.name ? -1 : 1));
+
+  const close = (body: string, omitted: number): string =>
+    omitted === 0
+      ? body
+      : `${body}\n${omitted} further table(s) omitted as the bound was reached.`;
+
+  let body = header;
+  let shown = 0;
+  for (const table of tables) {
+    const candidate = `${body}\n${renderOperationsTable(table)}`;
+    if (fenceUntrustedContent(close(candidate, tables.length - shown - 1), source).length > maxChars) break;
+    body = candidate;
+    shown += 1;
+  }
+
+  return `${lead}${fenceUntrustedContent(close(body, tables.length - shown), source)}`;
 }

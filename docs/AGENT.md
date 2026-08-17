@@ -321,18 +321,21 @@ coverage it does not have.
 it does not have, and its rules then steer it to the refusal path rather than to generic advice. That
 happens on any engine outside PostgreSQL and SQLite, and whenever the catalog read is itself refused.
 
-**An `operations` plan is ungrounded by decision**, not by failure: that objective is about what the
-engine reports about itself rather than about what its tables contain, so a catalog read would spend
-the run's statements on an inventory the plan has no use for. It is the one workflow whose plan
-deliverable is prose.
+**An `operations` plan is grounded with a smaller subset** than the full inventory, on the same two
+engines every other workflow grounds on. The objective is about what the engine reports about itself,
+but those reports are full of schema identifiers — locks on tables, slow queries naming relations,
+storage per-table, index readings by name — so the run is handed the table and index **names**, without
+column types or the relations graph. On any other engine it is still ungrounded and is told so. Its
+plan deliverable is still prose; the prose rules now tell it to name the real objects it was shown.
 
 Three consequences worth stating plainly, because each is easy to assume the other way round:
 
 1. **A plan run costs statements now.** Grounding is catalog reads plus one statistics read (two on
    SQLite: the `sqlite_stat1` availability probe has to be its own statement, because SQLite resolves
-   table names at prepare time). They come out of the same per-run statement budget every other read
-   does, and they are audited the same way. The ledger-reuse path saves the catalog reads and
-   deliberately does **not** save the statistics read.
+   table names at prepare time). An `operations` plan reads the catalog too but not the statistics:
+   its subset is names only. They come out of the same per-run statement budget every other read does,
+   and they are audited the same way. The ledger-reuse path saves the catalog reads and deliberately
+   does **not** save the statistics read.
 2. **A plan run now writes `context-captured` to its own ledger**, which it never did before, and
    holds the reading in the process for the next run on that connection. Grounding therefore survives
    a restart. The deferral that recorded the opposite ("a plan run's grounding does not survive a
@@ -681,11 +684,12 @@ gives. A run that composed nothing is `no-report`, and a cancelled one says so i
 
 The citation half of the rule — *your report must cite a reading you took* — is told to the model in
 `WORKFLOW_TOOL_RULES` and enforced where it can actually fail: at composition. `composeReportTool`
-refuses any claim whose evidence does not name something this run produced, and the only citable
-thing an operations run can produce IS a reading (it is offered no other tool that settles a step and
-captures no schema snapshot). A verifier arm for "cited no reading" would therefore be a verdict
-advertised to users that no run could ever show, which is the same dead-arm objection that kept the
-other templates honest.
+refuses any claim whose evidence does not name something this run produced, and the only thing an
+operations run can produce as a finding is a reading (it is offered no other tool that settles a
+step). The schema snapshot the server hands it names the objects the readings refer to, but it is the
+run's context, not evidence a finding can rest on. A verifier arm for "cited no reading" would
+therefore be a verdict advertised to users that no run could ever show, which is the same dead-arm
+objection that kept the other templates honest.
 
 Two limits stated rather than glossed:
 
@@ -1116,9 +1120,12 @@ workflow type is decided once when the run opens and read from the ledger therea
 
 **These figures are approved and pending live measurement.** They were approved on 2026-08-14 as the
 starting point a measurement then confirms or corrects; no run has been measured against them yet.
-`operations` is lower than the analytical rows on purpose: it sends no SQL, so it never drafts a
-statement, never repairs one and never iterates towards an aggregate that came out wrong — and its
-reads come from a closed set of six curated kinds, so twelve statements is every kind twice.
+`operations` is lower than the analytical rows on purpose: it sends no SQL of the model's, so it never
+drafts a statement, never repairs one and never iterates towards an aggregate that came out wrong —
+and its reads come from a closed set of six curated kinds, so twelve statements is every kind twice.
+Its run-start grounding now pays the same catalog reads every other workflow does (three on
+PostgreSQL, two on SQLite) out of that same twelve; the figure is unchanged until live measurement
+says otherwise.
 
 `data-analysis` is the largest row, and every one of its four figures is bought rather than
 inherited. An analytical run's shape is a handful of exploratory reads to find the fact table,
