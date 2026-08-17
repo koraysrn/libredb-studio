@@ -1705,6 +1705,12 @@ export async function runInvestigation(
   // behind. A queued run is one nothing has driven yet; a running one is a resume.
   const resumed = await service.resume(runId);
 
+  // One drive per run in this process: two would both pass `runStep`'s
+  // read-then-append check and execute the same step twice (`docs/BACKLOG.md` B5).
+  // Released in the `finally` at the foot of this function, so a drive that throws
+  // still leaves the run claimable by the next one.
+  service.claimDrive(runId);
+  try {
   // WHERE a run acts is as much the record's to decide as WHO it acts as. Driving a
   // run with another connection's resources would execute against that connection
   // while the ledger header went on naming the one the run was opened for, so the
@@ -2260,6 +2266,9 @@ export async function runInvestigation(
     else result = await driveTurn(remainingMs);
   }
   return result;
+  } finally {
+    service.releaseDrive(runId);
+  }
 }
 
 async function handleCall(input: {

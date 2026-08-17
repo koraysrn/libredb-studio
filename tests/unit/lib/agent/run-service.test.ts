@@ -843,3 +843,19 @@ describe("AgentRunService — timestamps", () => {
     expect(view?.record.createdAtMs).toBe(1_700_000_000_000);
   });
 });
+
+// ─── one drive per run, in this process ────────────────────────────────────
+
+describe("AgentRunService — drive ownership", () => {
+  test("a second claim on a run already being driven refuses, and release makes it claimable again", async () => {
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+
+    await h.service.claimDrive(runId);
+    expect((await captureServiceError(() => h.service.claimDrive(runId))).reasonCode).toBe("RUN_ALREADY_DRIVEN");
+
+    h.service.releaseDrive(runId);
+    await h.service.claimDrive(runId);
+    h.service.releaseDrive(runId);
+  });
+});

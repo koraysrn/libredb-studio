@@ -185,7 +185,12 @@ export interface AgentRunLedgerView {
   readonly unsettledStepIds: readonly string[];
 }
 
-export type AgentRunStoreReason = "INVALID_RUN_ID" | "RUN_ALREADY_OPEN" | "MALFORMED_LEDGER" | "RUNTIME_DISABLED";
+export type AgentRunStoreReason =
+  | "INVALID_RUN_ID"
+  | "RUN_ALREADY_OPEN"
+  | "RUN_ALREADY_CLOSED"
+  | "MALFORMED_LEDGER"
+  | "RUNTIME_DISABLED";
 
 export class AgentRunStoreError extends Error {
   readonly reasonCode: AgentRunStoreReason;
@@ -359,6 +364,9 @@ function foldLedger(runId: string, entries: readonly AgentLedgerEntry[]): AgentR
  * The run ledger. One instance per process is enough: it holds no run state of
  * its own, only the world it writes through.
  */
+/** Runs whose stream has been closed in THIS process. An append to one is a bug. */
+const closedStreams = new Set<string>();
+
 export class AgentRunStore {
   private readonly world: AgentLedgerWorld;
   private readonly clock: () => number;
@@ -469,13 +477,27 @@ export class AgentRunStore {
     });
   }
 
-  /** Ends the run's stream, so every live reader of its timeline completes. */
+  /**
+   * Ends the run's stream, so every live reader of its timeline completes.
+   *
+   * The closed marker is recorded BEFORE the backend close so that an append that
+   * races this call fails loudly instead of resolving against a stream the backend
+   * has already cut short — the silent-loss mode `append` cannot detect, because a
+   * write to a closed stream reports success while `read` never returns the entry.
+   */
   async close(runId: string): Promise<void> {
     const id = assertRunId(runId);
+    closedStreams.add(id);
     await this.world.closeStream(ledgerStreamName(id), id);
   }
 
   private async append(runId: string, entry: AgentLedgerEntry): Promise<void> {
+    if (closedStreams.has(runId)) {
+      throw new AgentRunStoreError(
+        "RUN_ALREADY_CLOSED",
+        `agent run "${runId}" has ended; its ledger accepts no further entries`,
+      );
+    }
     assertPersistableState(entry, "agent.run.ledger");
     // One newline-terminated entry per write. Framing is on newlines rather than
     // on chunk boundaries because a backend is free to coalesce or split chunks;
