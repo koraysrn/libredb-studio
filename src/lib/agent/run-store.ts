@@ -25,17 +25,17 @@
  * Three deliberate boundaries, each of which a reader would otherwise have to
  * infer:
  *
- *  - **This module enforces no lifecycle policy.** `appendEvent` does not check
- *    that the run exists, is not terminal, or is allowed to emit that event. The
- *    run service reads the view before every operation and owns those decisions;
- *    keeping them out of here means one round trip per append rather than two.
- *    Two costs of the split, both real and both measured rather than assumed:
- *    appending to a run that was never opened produces a headerless ledger, which
- *    every later read then refuses; and appending AFTER `close` resolves
- *    successfully while `read` never returns the entry, because the backend stops
- *    a snapshot at the stream's end marker. Silent loss is the worse of the two,
- *    which is why the service refuses every operation on a terminal run rather
- *    than relying on this layer to notice.
+ *  - **This module enforces one lifecycle boundary, and only one.** `append`
+ *    refuses once the run's stream has been closed in this process
+ *    (`RUN_ALREADY_CLOSED`), because the backend reports success for a write to a
+ *    closed stream while `read` never returns the entry — silent loss, which is the
+ *    worse failure mode and the one this guard exists to make loud. Everything
+ *    else stays the run service's: whether the run exists, whether it is terminal,
+ *    and whether it is allowed to emit a given event are all decided there, from
+ *    the view it reads before every operation, and keeping them out of here means
+ *    one round trip per append rather than two. The remaining cost of the split is
+ *    real and measured rather than assumed: appending to a run that was never
+ *    opened produces a headerless ledger, which every later read then refuses.
  *  - **Opening a run is read-then-append with no fencing.** Two concurrent opens
  *    on one caller-supplied id therefore write two headers, and a second header is
  *    permanent corruption to the fold (below) rather than a race one side wins.
@@ -361,12 +361,18 @@ function foldLedger(runId: string, entries: readonly AgentLedgerEntry[]): AgentR
 }
 
 /**
+ * Runs whose stream has been closed in THIS process. Module-level and never pruned,
+ * on purpose: a run's ledger is append-only for the life of the process, so a closed
+ * stream never reopens, and sharing the set across every `AgentRunStore` instance is
+ * what makes a `close` on one instance refuse an `append` on another. Growth is
+ * bounded by the number of runs this process opens before it restarts.
+ */
+const closedStreams = new Set<string>();
+
+/**
  * The run ledger. One instance per process is enough: it holds no run state of
  * its own, only the world it writes through.
  */
-/** Runs whose stream has been closed in THIS process. An append to one is a bug. */
-const closedStreams = new Set<string>();
-
 export class AgentRunStore {
   private readonly world: AgentLedgerWorld;
   private readonly clock: () => number;

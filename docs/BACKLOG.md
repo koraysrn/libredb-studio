@@ -1607,20 +1607,29 @@ consequences follow that a single-writer run never meets and a second writer wou
   *per run* — the milestone's "no tool execution performed twice" criterion is about a restart, where
   the dead process is gone by construction, and that case is genuinely covered.
 
-Not defended in code because every available defence is worse than the constraint: a lock file is
-single-instance only (which the Postgres backend exists to escape), and a lease in the ledger is a
-distributed-lock design with its own expiry semantics. The honest boundary is that single ownership of
-a running workflow belongs to the layer above rather than being re-implemented below it — and how
-strong that guarantee is depends on which backend is configured, which is the part worth stating
-plainly. On the zero-config local world it holds by construction: the queue awaits each delivery
-before attempting the next, so retries are sequential. On the opt-in Postgres backend a
+Not defended at the storage layer because every available cross-process defence is worse than the
+constraint: a lock file is single-instance only (which the Postgres backend exists to escape), and a
+lease in the ledger is a distributed-lock design with its own expiry semantics. The honest boundary is
+that single ownership of a running workflow belongs to the layer above rather than being re-implemented
+below it — and how strong that guarantee is depends on which backend is configured, which is the part
+worth stating plainly. On the zero-config local world it holds by construction: the queue awaits each
+delivery before attempting the next, so retries are sequential. On the opt-in Postgres backend a
 visibility-timeout redelivery can overlap a handler that is still alive, and that is precisely where
 the second bullet above would bite.
+
+The process-local half of the fence now exists (2026-08): `AgentRunService.claimDrive`/`releaseDrive`
+(`src/lib/agent/run-service.ts`) refuse a second concurrent drive of one run inside a single process,
+and `AgentRunStore.append` refuses an append once the run's stream has been closed
+(`RUN_ALREADY_CLOSED`), turning the silent-loss mode of the second consequence into a loud refusal.
+What remains open is the cross-process half: two replicas driving one run would still both pass the
+read-then-append check, because the durable backend offers no compare-and-append.
 
 Done when either the run ledger can append conditionally on the stream's tail index (which is what
 would make both races impossible at the storage layer), or the single-ownership guarantee the runtime
 provides is asserted by a test rather than assumed by prose — whichever the durable backend can
-actually support.
+actually support. The process-local claim is asserted in
+`tests/unit/lib/agent/run-service.test.ts`, and the append-after-close guard in
+`tests/unit/lib/agent/run-store.test.ts`.
 
 ### B6. Every agent cost ceiling is per-drive, so N resumes cost up to N times one drive's budget
 

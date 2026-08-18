@@ -48,6 +48,7 @@ import { verifyRunGoal } from "./goal-verifier";
 import type { ExecutionArtifactStore } from "@/lib/db/operations/artifacts";
 import type { ExecutionBudgetTracker } from "@/lib/db/operations/budgets";
 import type { QueryResult } from "@/lib/types";
+import { AgentRunStoreError } from "./run-store";
 import type { AgentLedgerEntry, AgentRunLedgerView, AgentRunStore, AgentSettledStepEvent } from "./run-store";
 import type { AgentOperationId, AgentToolName } from "./tools";
 import type {
@@ -234,8 +235,13 @@ export class AgentRunService {
    * refuses rather than waits, because two drives would both pass `runStep`'s
    * read-then-append check and execute the same step twice. The caller releases in a
    * `finally`, so a drive that throws still leaves the run claimable by the next one.
+   *
+   * The claim has no expiry, and needs none inside one process: the drive's `finally`
+   * always releases it, a single drive is bounded by the run's own deadline, and a
+   * process death drops the whole set — the cross-process case belongs to the durable
+   * backend's queue (`docs/BACKLOG.md` B5).
    */
-  async claimDrive(runId: string): Promise<void> {
+  claimDrive(runId: string): void {
     if (activeDrives.has(runId)) {
       throw new AgentRunServiceError(
         "RUN_ALREADY_DRIVEN",
@@ -326,13 +332,23 @@ export class AgentRunService {
    * belongs to T9.
    */
   async cancel(runId: string, by: AgentRunActor): Promise<AgentRunStatusReport> {
-    const view = await this.readOrThrow(runId);
-    if (view.terminal) return report(view);
-    if (view.record.status === "queued") {
-      return report(await this.finalize(runId, "cancelled", { stopReason: "cancelled" }));
+    try {
+      const view = await this.readOrThrow(runId);
+      if (view.terminal) return report(view);
+      if (view.record.status === "queued") {
+        return report(await this.finalize(runId, "cancelled", { stopReason: "cancelled" }));
+      }
+      await this.store.requestCancellation(runId, by);
+      return report(await this.readOrThrow(runId));
+    } catch (error) {
+      // A run closed between the read above and the write below is already terminal:
+      // another writer ended it. The caller asked to cancel, and the run is, in fact,
+      // done — answer with its view rather than a refusal the route would turn into 500.
+      if (error instanceof AgentRunStoreError && error.reasonCode === "RUN_ALREADY_CLOSED") {
+        return report(await this.readOrThrow(runId));
+      }
+      throw error;
     }
-    await this.store.requestCancellation(runId, by);
-    return report(await this.readOrThrow(runId));
   }
 
   /**

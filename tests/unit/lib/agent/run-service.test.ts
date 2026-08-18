@@ -547,6 +547,21 @@ describe("AgentRunService — cancellation", () => {
     const h = harness();
     expect((await captureServiceError(() => h.service.cancel("arun_ff", ACTOR))).reasonCode).toBe("RUN_NOT_FOUND");
   });
+
+  test("cancelling a run whose stream another writer closed answers with its view, not a refusal", async () => {
+    // The race `cancel` tolerates: its read saw the run still live, but a second
+    // writer finished and closed the stream before its own write landed. The close
+    // alone is `run-store`'s loud guard against an append to an ended stream, and it
+    // must not escape `cancel` as a 500 — the run IS done, which is what the caller
+    // asked for.
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+
+    await h.store.close(runId);
+
+    const report = await h.service.cancel(runId, OTHER_ACTOR);
+    expect(report.record.runId).toBe(runId);
+  });
 });
 
 // ─── the write-ahead invariant ──────────────────────────────────────────────
@@ -851,11 +866,11 @@ describe("AgentRunService — drive ownership", () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
 
-    await h.service.claimDrive(runId);
-    expect((await captureServiceError(() => h.service.claimDrive(runId))).reasonCode).toBe("RUN_ALREADY_DRIVEN");
+    h.service.claimDrive(runId);
+    expect((await captureServiceError(async () => h.service.claimDrive(runId))).reasonCode).toBe("RUN_ALREADY_DRIVEN");
 
     h.service.releaseDrive(runId);
-    await h.service.claimDrive(runId);
+    h.service.claimDrive(runId);
     h.service.releaseDrive(runId);
   });
 });
