@@ -5,7 +5,7 @@ import path from "node:path";
 import { createLocalWorld } from "@workflow/world-local";
 import { AgentRunService, AgentRunServiceError } from "@/lib/agent/run-service";
 import type { AgentRunStepSettlement } from "@/lib/agent/run-service";
-import { AgentRunStore } from "@/lib/agent/run-store";
+import { AgentRunStore, AgentRunStoreError } from "@/lib/agent/run-store";
 import { logger } from "@/lib/logger";
 import type { AgentRunActor } from "@/lib/agent/types";
 import { ExecutionArtifactStore } from "@/lib/db/operations/artifacts";
@@ -548,19 +548,39 @@ describe("AgentRunService — cancellation", () => {
     expect((await captureServiceError(() => h.service.cancel("arun_ff", ACTOR))).reasonCode).toBe("RUN_NOT_FOUND");
   });
 
-  test("cancelling a run whose stream another writer closed answers with its view, not a refusal", async () => {
-    // The race `cancel` tolerates: its read saw the run still live, but a second
-    // writer finished and closed the stream before its own write landed. The close
-    // alone is `run-store`'s loud guard against an append to an ended stream, and it
-    // must not escape `cancel` as a 500 — the run IS done, which is what the caller
-    // asked for.
+  test("cancelling a run another writer finished mid-cancel answers with its terminal view", async () => {
+    // The race `cancel` tolerates, built the way it actually happens: its read sees a
+    // live run, another writer finalizes it — `run-finished` appended, then the stream
+    // closed — and only then does `requestCancellation` reach `run-store`'s guard. The
+    // refusal must not escape as a 500: the run IS ended, which is what the caller
+    // asked for. The stubbed read hands `cancel` the stale view it would have won.
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+
+    const read = h.store.read.bind(h.store);
+    spyOn(h.store, "read").mockImplementationOnce(async (id: string) => {
+      const stale = await read(id);
+      await h.service.finish(runId, "failed", { reason: "internal" });
+      return stale;
+    });
+
+    const cancelled = await h.service.cancel(runId, OTHER_ACTOR);
+    expect(cancelled.record.status).toBe("failed");
+  });
+
+  test("a closed stream over a run the ledger does not show as ended refuses rather than reporting success", async () => {
+    // The other side of the same guard. A closed stream is only ever produced by
+    // `finalize`, which appends `run-finished` first — so a closed stream over a run
+    // still queued means the cancellation was LOST. Answering with that view would be
+    // a 200 on a run nothing cancelled: the silent loss this whole change exists to
+    // make loud. It refuses instead.
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
 
     await h.store.close(runId);
 
-    const report = await h.service.cancel(runId, OTHER_ACTOR);
-    expect(report.record.runId).toBe(runId);
+    await expect(h.service.cancel(runId, OTHER_ACTOR)).rejects.toThrow(AgentRunStoreError);
   });
 });
 

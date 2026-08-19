@@ -341,11 +341,21 @@ export class AgentRunService {
       await this.store.requestCancellation(runId, by);
       return report(await this.readOrThrow(runId));
     } catch (error) {
-      // A run closed between the read above and the write below is already terminal:
-      // another writer ended it. The caller asked to cancel, and the run is, in fact,
-      // done — answer with its view rather than a refusal the route would turn into 500.
+      /*
+        A run closed between the read above and the write below was ended by another
+        writer, and `finalize` — the only caller of `close` — appends `run-finished`
+        BEFORE it closes. So the re-read settles it: a terminal view is the answer the
+        caller asked for, and returning it beats a refusal the route would turn into a
+        500 for a user who pressed stop on a run that had just ended.
+
+        The re-read is checked rather than trusted. A closed stream over a run the
+        ledger does not show as ended means the cancellation was genuinely lost, and
+        answering 200 on a run still queued or running would be exactly the silent loss
+        `RUN_ALREADY_CLOSED` exists to make loud — so that case rethrows.
+      */
       if (error instanceof AgentRunStoreError && error.reasonCode === "RUN_ALREADY_CLOSED") {
-        return report(await this.readOrThrow(runId));
+        const settled = await this.readOrThrow(runId);
+        if (settled.terminal) return report(settled);
       }
       throw error;
     }
