@@ -1617,6 +1617,16 @@ delivery before attempting the next, so retries are sequential. On the opt-in Po
 visibility-timeout redelivery can overlap a handler that is still alive, and that is precisely where
 the second bullet above would bite.
 
+Both of those readings describe a queue that delivers agent drives, and **nothing delivers one today**
+— which is B9, and the two entries have to be read together because B5's severity is a function of
+B9's state. `mintAgentDriveToken` has no production caller, there is no `"use workflow"` function and
+no queue producer, so a run is driven exactly once, in the process that opened it
+(`src/app/api/agent/runs/route.ts`). A second drive of one run is therefore not reachable through the
+product on EITHER backend right now: producing one takes a caller that mints its own drive credential
+from `JWT_SECRET`, which is how the fence below was exercised against a live run rather than only in
+a test. Closing B9 is what makes this live, and in that order — a producer without the fence is a
+redelivery that runs the user's statement a second time.
+
 The process-local half of the fence now exists (2026-08): `AgentRunService.claimDrive`/`releaseDrive`
 (`src/lib/agent/run-service.ts`) refuse a second concurrent drive of one run inside a single process,
 and `AgentRunStore.append` refuses an append once the run's stream has been closed
@@ -1725,6 +1735,13 @@ the run as `failed` with a classified reason (`docs/AGENT.md`, "A drive that die
 so an unconfigured model no longer leaves a run at `queued` forever. This entry is the case where the
 process is GONE — nothing threw, nothing can record, and the run stays `running` until something asks
 for it. Recording a failure cannot close that; only a producer can.
+
+Order matters against B5, which is why each entry now names the other: the producer this asks for is
+also what first makes a SECOND drive of one run possible, and a redelivery landing on a drive that is
+still running is a second execution against the user's database. B5's process-local fence
+(`claimDrive`/`releaseDrive`) is already in place, so the single-replica case is covered before the
+producer arrives; the cross-process case is not, and a producer plus more than one replica is the
+combination B5 still has no answer for.
 
 Adopting the SDK's Next.js integration is what would supply the producer, and it was refused
 deliberately rather than overlooked. Its documented setup asks for `/.well-known/workflow/*` to be
