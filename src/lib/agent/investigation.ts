@@ -2043,7 +2043,7 @@ export async function runInvestigation(
     already said. Nothing durable bounds them, because a delivery writes no ledger entry
     — `docs/BACKLOG.md` B51 records both halves as one item, since recording delivery is
     what would make "once" mean once.
-  */
+    */
     /** The reserve notice is a one-shot: a drive tells the run once that it is out of room. */
     let reserveAnnounced = false;
     /** Whether a tool this run HOLDS has been called; see `remindToReport`. */
