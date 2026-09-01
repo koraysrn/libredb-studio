@@ -2511,7 +2511,7 @@ the role's own grants are the whole boundary (A3).
   and never what it said, so an empty completion reaches it too and a model's recorded
   `retryEmptyTurn: false` decides nothing. Pinned as it behaves rather than narrowed, because the
   narrowing would move behaviour five passing runs were measured under.
-- **B76** — the aggregated capture that fixed the wide-catalog refusal (B52) now ADMITS the image's own
+- **B76** — the aggregated capture that fixed the wide-catalog refusal now ADMITS the image's own
   extension views, so a grounded run on TimescaleDB, Cloudberry or AlloyDB Omni reasons over an
   inventory that is mostly internal objects (measured: AlloyDB's least-privilege role sees 67 extension
   views beside its 2 user tables). Not a privilege leak — the role genuinely sees them — but grounding

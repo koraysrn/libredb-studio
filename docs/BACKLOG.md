@@ -1968,7 +1968,8 @@ says which.
 
 ### B76. The aggregated grounding capture admits the image's own extension views
 
-B52's aggregation made a stock image's wide catalog capture SUCCEED instead of refusing, and the price
+The aggregation that fixed the row-cap refusal made a stock image's wide catalog capture SUCCEED instead
+of refusing, and the price
 is that it succeeds by admitting the image's own objects. Measured live on 2026-09-01 against the
 `compat` profile images (`database-compose.yml`), with two user tables seeded:
 
@@ -1983,9 +1984,10 @@ but grounding noise: the inventory a run reasons over is mostly objects the user
 model-facing pack spends `AGENT_CONTEXT_PACK_MAX_CHARS` ranking them against the objective. The old flat
 projection had the same object set; it just refused before any of it reached a run.
 
-The candidate fixes are the ones B52 recorded and set aside: filter by `table_type`, or exclude the
-objects the object browser already treats as internal. B52 refuted only the schema-exclusion variant AS
-A FIX FOR THE ROW CAP; as a fix for grounding noise the question is open and unmeasured.
+The candidate fixes are the ones the row-cap fix recorded and set aside: filter by `table_type`, or
+exclude the objects the object browser already treats as internal. That fix refuted only the
+schema-exclusion variant AS A FIX FOR THE ROW CAP; as a fix for grounding noise the question is open and
+unmeasured.
 
 **Done when:** a run grounded on one of these images reasons over the user's objects — or the internal
 ones are excluded — with a test per shape (TimescaleDB, Cloudberry, AlloyDB Omni).
