@@ -84,21 +84,38 @@ Two companion pages carry what this one deliberately does not:
 
 ## Table of Contents
 
-- [Turning it on](#turning-it-on)
-- [What a run is](#what-a-run-is)
-- [Durability and resume](#durability-and-resume)
-- [The tool set](#the-tool-set)
-- [What bounds a run](#what-bounds-a-run)
-- [Supported models](#supported-models)
-- [The model side](#the-model-side)
-- [Whether the run answered](#whether-the-run-answered)
-- [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
-- [HTTP surface](#http-surface)
-- [The surface in the app](#the-surface-in-the-app)
-- [Deployment](#deployment)
-- [Package boundary](#package-boundary)
-- [Module map](#module-map)
-- [Known limitations](#known-limitations)
+- [Agent Runtime — LibreDB Studio](#agent-runtime--libredb-studio)
+  - [Table of Contents](#table-of-contents)
+  - [Turning it on](#turning-it-on)
+  - [What a run is](#what-a-run-is)
+    - [The conversation a run belongs to](#the-conversation-a-run-belongs-to)
+    - [What a plan run knows](#what-a-plan-run-knows)
+    - [What the inventory is an inventory OF](#what-the-inventory-is-an-inventory-of)
+    - [The statement a plan run drafts](#the-statement-a-plan-run-drafts)
+  - [Durability and resume](#durability-and-resume)
+    - [A drive that dies before the loop](#a-drive-that-dies-before-the-loop)
+  - [The tool set](#the-tool-set)
+    - [The query-optimization template](#the-query-optimization-template)
+    - [The database-assessment template](#the-database-assessment-template)
+    - [The operations template](#the-operations-template)
+    - [The data-analysis template](#the-data-analysis-template)
+    - [Presenting an answer](#presenting-an-answer)
+    - [Handing the answer to the editor (auto-execute)](#handing-the-answer-to-the-editor-auto-execute)
+    - [What the fence is proved to hold against](#what-the-fence-is-proved-to-hold-against)
+  - [What bounds a run](#what-bounds-a-run)
+  - [Supported models](#supported-models)
+  - [The model side](#the-model-side)
+    - [What a refused model looks like in the app](#what-a-refused-model-looks-like-in-the-app)
+  - [Whether the run answered](#whether-the-run-answered)
+    - [The eval harness](#the-eval-harness)
+  - [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
+  - [HTTP surface](#http-surface)
+  - [The surface in the app](#the-surface-in-the-app)
+  - [Deployment](#deployment)
+  - [Package boundary](#package-boundary)
+  - [Module map](#module-map)
+  - [Known limitations](#known-limitations)
+  - [Related documentation](#related-documentation)
 
 ## Turning it on
 
@@ -2485,39 +2502,6 @@ the role's own grants are the whole boundary (A3).
   fix,
   left unmodelled because the user-index reader drops `COLLATE` too and honouring it in one reader
   only would make the inventory disagree with itself.
-- **B52** — the composed PostgreSQL grounding capture is refused by what the IMAGE ships rather
-  than by a wide user schema, and it has now been measured on three different servers.
-  `composeCatalogRead` projects one row per COLUMN against `maxResultRows: 200` and refuses rather
-  than truncates, which its own comment estimates as "roughly 25 tables of eight columns". Measured on
-  2026-08-20 against a stock TimescaleDB 2.29.2 (PostgreSQL 17.11) with TWO user tables:
-  `information_schema.columns` answers 478 rows, of which 473 belong to the extension's own schemas
-  and 5 to the user, so the capture is refused and the plan run answers ungrounded. Verified as
-  server-caused, not path-caused: plain PostgreSQL 18 and YugabyteDB both captured their schemas under
-  the same least-privilege role, and granting that role the internal schemas changed nothing.
-  Reproduced the same day on Apache Cloudberry 2.1.0-incubating (PostgreSQL 14.4), which is a fork
-  rather than an extension, so the shape is not one product's: with the same two user tables the read
-  is refused as `CATALOG_READ_REFUSED` at **289 rows against the 200 allowed**, **282** of those rows
-  belonging to Cloudberry's own `gp_toolkit` schema and 7 to the user's two tables. The total is
-  per-role and only means something with the role named: the same read as `gpadmin` answers 481 rows,
-  470 of them `gp_toolkit`, 7 `public` and 4 `pg_ext_aux`. Cloudberry also puts a second wall in front
-  of the first, which a user hitting it needs to know about: `gpadmin` is the login the engine gives
-  you and it is a superuser, so the execution profile refuses the role as unverified or too broad
-  (`is_superuser`, `reads_server_files`, `writes_server_files`, `executes_programs`) and an agent run
-  there needs a hand-made least-privilege `agentUser` before it can even reach the row budget - and
-  then hits it. Measured a third time the same day on AlloyDB Omni 17.9.0 (PostgreSQL 17.9), which is
-  the instance that decides the fix: the read is refused at **536 rows against the 200 allowed** with
-  only **7** of them the user's, and the overflow is **not** in an internal schema - 341 of the 348
-  rows attributed to `public` are the 49 extension views the image installs into `public` itself, with
-  `google_ml` 144 and `ai` 44 behind them. Narrowing the capture to `schema=public` therefore still
-  refuses, at 348 rows, so the candidate fix of excluding the schemas the object browser treats as
-  internal - which would have rescued both TimescaleDB and Cloudberry - is refuted here, and the only
-  surviving fix is to aggregate columns per table so the projection is one row per OBJECT. AlloyDB
-  Omni is a superuser-login image too, so it hits Cloudberry's first wall as well. Two controls keep
-  those numbers attributable: plain PostgreSQL 18.4 in the same pass projects 7 rows and captures its
-  2 tables, and the 0-rows-as-agent-role result on the `relations` kind reproduces identically on that
-  baseline, so it is PostgreSQL's privilege rule and not an AlloyDB property. The agent is therefore
-  unusable out of the box on all three, and the same shape will appear on any PostgreSQL whose image
-  ships wide catalogs or wide extension views before the user has created anything.
 - **B59** — per-model WORDING has nowhere to go. A sentence is a measured value here (twice a shared
   change won cells and lost others, and had to be reverted whole), and the per-model override is
   gone: the document refuses wording and nothing else can populate it. Refusing unsigned prompt text
@@ -2527,6 +2511,12 @@ the role's own grants are the whole boundary (A3).
   and never what it said, so an empty completion reaches it too and a model's recorded
   `retryEmptyTurn: false` decides nothing. Pinned as it behaves rather than narrowed, because the
   narrowing would move behaviour five passing runs were measured under.
+- **B76** — the aggregated capture that fixed the wide-catalog refusal (B52) now ADMITS the image's own
+  extension views, so a grounded run on TimescaleDB, Cloudberry or AlloyDB Omni reasons over an
+  inventory that is mostly internal objects (measured: AlloyDB's least-privilege role sees 67 extension
+  views beside its 2 user tables). Not a privilege leak — the role genuinely sees them — but grounding
+  noise; the object set was the same under the flat projection, which refused before any of it reached
+  a run.
 
 **Settled as limits rather than as work.** The seven below have no entry in `docs/BACKLOG.md`, and
 that is the point: each is how the product behaves, stated where a reader of this document will meet
