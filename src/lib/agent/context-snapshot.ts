@@ -267,13 +267,26 @@ const qualified = (schema: unknown, table: unknown): string => `${text(schema)}.
  * Anything else is the empty inventory rather than an exception: a row this cannot
  * read says nothing about its columns, and refusing it here would turn one malformed
  * row into a lost snapshot.
+ *
+ * The ELEMENTS are filtered for the same reason the value is, and the filter is the
+ * load-bearing half: `Array.isArray` says nothing about what is IN the array, so a
+ * `null` element used to reach the fold and be read as `column.name` — a TypeError,
+ * raised where `buildPostgresTables` runs OUTSIDE `readInventory`'s catch, which ends
+ * the run `internal` rather than degrading the capture (the shape B48 exists to keep
+ * out of this path). A bad element is dropped rather than emptying the list: the rest
+ * of the array is still an inventory, and losing one entry says less than losing the
+ * table.
  */
 function parsePostgresColumns(value: unknown): readonly Record<string, unknown>[] {
-  if (Array.isArray(value)) return value as readonly Record<string, unknown>[];
+  const entries = (candidate: unknown): readonly Record<string, unknown>[] =>
+    Array.isArray(candidate)
+      ? candidate.filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+      : [];
+
+  if (Array.isArray(value)) return entries(value);
   if (typeof value === "string" && value.trim() !== "") {
     try {
-      const parsed: unknown = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed as readonly Record<string, unknown>[];
+      return entries(JSON.parse(value) as unknown);
     } catch {
       return [];
     }

@@ -159,16 +159,26 @@ function equalsClause(column: string, value: string | undefined, field: string, 
  *
  * The projection used to be one row per COLUMN. Against `maxResultRows: 200` that
  * refused an unnarrowed capture on any PostgreSQL image whose own catalogs are wide
- * before the user creates anything — measured on TimescaleDB (478 rows), Cloudberry
- * (289) and AlloyDB Omni (536), where the user's own tables were a handful of those
- * rows. Aggregating the columns per table makes the projection one row per OBJECT,
- * symmetric with the SQLite side, so a stock image answers a few dozen rows instead
- * of a few hundred.
+ * before the user creates anything. Two measurements exist and they disagree by
+ * design, so each is stated with what it was taken UNDER: as a least-privilege agent
+ * role on 2026-08-20, TimescaleDB answered 478 flat rows, Cloudberry 289 and AlloyDB
+ * Omni 536; re-measured on 2026-09-01 with the aggregation in place and two seeded
+ * user tables, the same reads answer 46, 67 and 70 OBJECT rows. The totals are
+ * per-role and per-image and mean nothing without both.
  *
  * `json_agg … ORDER BY ordinal_position` keeps the column order, which is the one
  * property the flat projection used to guarantee. The object keys are the ones
  * `buildPostgresTables` reads (`name`, `type`, `nullable`), so the fold parses one
  * array per table instead of one row per column.
+ *
+ * MEASURED ON, and only on, the three servers B52 named plus stock PostgreSQL: the
+ * aggregate runs on Cloudberry's MPP planner, which is the one that refuses other
+ * reads with `multiple segworker groups is not supported`. NOT measured on the
+ * jsonb-only relatives in `WIRE_COMPATIBLE_ENGINES` — Materialize and RisingWave
+ * have no `json` type and may not carry `json_agg`/`json_build_object` at all. Both
+ * are `query-only` there and claim no grounding, so nothing regressed that was
+ * promised; a run that ever claims grounding on either has to measure this read
+ * first.
  *
  * The row budget now counts TABLES rather than columns, which is what a wide
  * catalog needs; two bounds still stand and are worth naming. A schema with more

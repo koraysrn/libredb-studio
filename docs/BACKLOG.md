@@ -1977,8 +1977,10 @@ is that it succeeds by admitting the image's own objects. Measured live on 2026-
 - Cloudberry (`woblerr/cloudberry:2.1.0-incubating`): 479 to 67 as gpadmin, 53 as a least-privilege role.
 - AlloyDB Omni (`google/alloydbomni:17.9.0`): 542 to 70 as postgres, 69 as a least-privilege role.
 
-AlloyDB is the sharp case: the least-privilege role's 69 tables are 2 user tables plus 67 `ai.*`,
-`google_db_advisor_*` and `hypopg_list_indexes` extension views. Not a privilege leak —
+AlloyDB is the sharp case: the least-privilege role's 69 tables are 2 user tables plus 67 extension views,
+and where they SIT is the part that makes them noise rather than a schema to exclude — 49 of them are
+installed into `public` itself (`google_db_advisor_*`, `hypopg_list_indexes`), beside 14 in `google_ml` and
+4 in `ai`. Not a privilege leak —
 `information_schema.columns` applies its own visibility rules and the role genuinely sees those views —
 but grounding noise: the inventory a run reasons over is mostly objects the user did not create, and the
 model-facing pack spends `AGENT_CONTEXT_PACK_MAX_CHARS` ranking them against the objective. The old flat

@@ -340,7 +340,9 @@ describe("captureContextSnapshot — wide PostgreSQL catalogs (B52)", () => {
   });
 
   test("a malformed columns value yields an empty column list, never a lost snapshot", async () => {
-    for (const malformed of [null, "", "not json", 42, { name: "id" }]) {
+    // `'"nope"'` is the one that parses and is still not an inventory: valid JSON,
+    // wrong shape, which is a different arm from text that does not parse at all.
+    for (const malformed of [null, "", "not json", '"nope"', 42, { name: "id" }]) {
       const h = harness("postgres", async (sql: string) =>
         sql.includes("information_schema.columns")
           ? result([{ table_schema: "public", table_name: "orders", columns: malformed }])
@@ -354,6 +356,52 @@ describe("captureContextSnapshot — wide PostgreSQL catalogs (B52)", () => {
       const columns = capture.snapshot.tables.find((table) => table.name === "public.orders")?.columns;
       expect(columns, `columns = ${JSON.stringify(malformed)}`).toEqual([]);
     }
+  });
+
+  /**
+   * The element-level half of the same guard, and the one that bites: an array PASSES
+   * `Array.isArray`, so a non-object element reaches the fold and `column.name` is read
+   * off it. On `null` that is a TypeError, and `plan.build` runs OUTSIDE the catch in
+   * `readInventory`, so it would not degrade the capture — it would end the run
+   * `internal`, which is the shape B48 exists to keep out of this path.
+   *
+   * A bad element is dropped rather than emptying the list, because the rest of the
+   * array is still a column inventory: losing one entry says less than losing the table.
+   */
+  test("drops column entries that are not objects, and keeps the ones that are", async () => {
+    const h = harness("postgres", async (sql: string) =>
+      sql.includes("information_schema.columns")
+        ? result([
+            {
+              table_schema: "public",
+              table_name: "orders",
+              columns: [null, "id", 42, { name: "customer_id", type: "integer", nullable: "NO" }],
+            },
+          ])
+        : result([]),
+    );
+
+    const capture = await captureContextSnapshot(h.context);
+
+    expect(capture.kind).toBe("captured");
+    if (capture.kind !== "captured") throw new Error("unreachable");
+    expect(capture.snapshot.tables.find((table) => table.name === "public.orders")?.columns).toEqual([
+      { name: "customer_id", type: "integer", nullable: false, isPrimary: false },
+    ]);
+  });
+
+  test("a JSON string of non-object entries yields an empty column list", async () => {
+    const h = harness("postgres", async (sql: string) =>
+      sql.includes("information_schema.columns")
+        ? result([{ table_schema: "public", table_name: "orders", columns: "[null, 1]" }])
+        : result([]),
+    );
+
+    const capture = await captureContextSnapshot(h.context);
+
+    expect(capture.kind).toBe("captured");
+    if (capture.kind !== "captured") throw new Error("unreachable");
+    expect(capture.snapshot.tables.find((table) => table.name === "public.orders")?.columns).toEqual([]);
   });
 
   test("preserves column order for a wide table, and the aggregated payload stays inside the byte budget", async () => {
