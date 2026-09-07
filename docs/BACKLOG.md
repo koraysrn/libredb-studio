@@ -40,7 +40,7 @@ None of it is a GitHub issue.
 - [Security Phase 2 deferrals](#security-phase-2-deferrals) — C3–C11 · 7
 - [Security Phase 3 deferrals](#security-phase-3-deferrals) — K4
 - [Agent M1 deferrals (#328)](#agent-m1-deferrals-328) — A1–A5 · 4
-- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2–B76 · 22
+- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2–B75 · 21
 
 ---
 
@@ -1835,31 +1835,3 @@ so), and none of them has been measured.
 
 **Done when:** a resume onto a repointed connection does one stated thing, and the run's own record
 says which.
-
-### B76. The aggregated grounding capture admits the image's own extension views
-
-The aggregation that fixed the row-cap refusal made a stock image's wide catalog capture SUCCEED instead
-of refusing, and the price
-is that it succeeds by admitting the image's own objects. Measured live on 2026-09-01 against the
-`compat` profile images (`database-compose.yml`), with two user tables seeded:
-
-- TimescaleDB (`timescale/timescaledb:latest-pg17`): 385 column rows aggregate to 46 tables.
-- Cloudberry (`woblerr/cloudberry:2.1.0-incubating`): 479 to 67 as gpadmin, 53 as a least-privilege role.
-- AlloyDB Omni (`google/alloydbomni:17.9.0`): 542 to 70 as postgres, 69 as a least-privilege role.
-
-AlloyDB is the sharp case: the least-privilege role's 69 tables are 2 user tables plus 67 extension views,
-and where they SIT is the part that makes them noise rather than a schema to exclude — 49 of them are
-installed into `public` itself (`google_db_advisor_*`, `hypopg_list_indexes`), beside 14 in `google_ml` and
-4 in `ai`. Not a privilege leak —
-`information_schema.columns` applies its own visibility rules and the role genuinely sees those views —
-but grounding noise: the inventory a run reasons over is mostly objects the user did not create, and the
-model-facing pack spends `AGENT_CONTEXT_PACK_MAX_CHARS` ranking them against the objective. The old flat
-projection had the same object set; it just refused before any of it reached a run.
-
-The candidate fixes are the ones the row-cap fix recorded and set aside: filter by `table_type`, or
-exclude the objects the object browser already treats as internal. That fix refuted only the
-schema-exclusion variant AS A FIX FOR THE ROW CAP; as a fix for grounding noise the question is open and
-unmeasured.
-
-**Done when:** a run grounded on one of these images reasons over the user's objects — or the internal
-ones are excluded — with a test per shape (TimescaleDB, Cloudberry, AlloyDB Omni).

@@ -438,6 +438,67 @@ describe("captureContextSnapshot — wide PostgreSQL catalogs (B52)", () => {
   });
 });
 
+describe("captureContextSnapshot — the capture excludes each image's own extension objects (B76)", () => {
+  const SHAPES = [
+    // TimescaleDB floods through _timescaledb_internal, the chunk schema; the name
+    // list excludes it before any ownership test runs.
+    { name: "TimescaleDB", schema: "_timescaledb_internal", ownedRelation: false },
+    // Cloudberry floods through gp_toolkit's views, excluded the same way.
+    { name: "Cloudberry", schema: "gp_toolkit", ownedRelation: false },
+    // AlloyDB Omni installs its views into public itself, so the relation
+    // ownership test is the only thing that reaches them.
+    { name: "AlloyDB Omni", schema: null, ownedRelation: true },
+  ];
+
+  test("the column read carries the full engine-schema list and both ownership tests", async () => {
+    const h = harness("postgres");
+
+    await captureContextSnapshot(h.context);
+
+    const columnRead = h.statements().find((sql) => sql.includes("information_schema.columns"));
+    expect(columnRead).toBeDefined();
+
+    // The full engine-builtin list, copied from the provider's object browser.
+    for (const schema of [
+      "pg_toast",
+      "_timescaledb_internal",
+      "gp_toolkit",
+      "pg_ext_aux",
+      "mz_catalog",
+      "crdb_internal",
+      "pg_extension",
+    ]) {
+      expect(columnRead, schema).toContain(`'${schema}'`);
+    }
+    // Both ownership tests: the schema one (google_ml/ai) and the relation one
+    // (AlloyDB's public extension views).
+    expect(columnRead).toContain("'pg_namespace'::regclass");
+    expect(columnRead).toContain("'pg_class'::regclass");
+    expect(columnRead).toContain("deptype = 'e'");
+  });
+
+  for (const shape of SHAPES) {
+    test(`a ${shape.name}-shaped database reaches the fold with its internal objects excluded`, async () => {
+      const h = harness("postgres");
+
+      await captureContextSnapshot(h.context);
+
+      const columnRead = h.statements().find((sql) => sql.includes("information_schema.columns"));
+      expect(columnRead).toBeDefined();
+
+      if (shape.schema !== null) {
+        expect(columnRead, shape.name).toContain(`'${shape.schema}'`);
+      }
+      if (shape.ownedRelation) {
+        // The sharp case: public is not a schema to exclude, so the ownership
+        // test over pg_class is the only mechanism that can reach these views.
+        expect(columnRead, shape.name).toContain("(table_schema, table_name) NOT IN");
+        expect(columnRead, shape.name).toContain("'pg_class'::regclass");
+      }
+    });
+  }
+});
+
 describe("captureContextSnapshot — SQLite", () => {
   test("takes two reads, because the table DDL carries the relations as well", async () => {
     const h = harness("sqlite");

@@ -8,7 +8,7 @@ import {
   MAX_CATALOG_SELECTOR_LENGTH,
 } from "@/lib/agent/composed-sql";
 import { agentReadSqlInput, inspectAgentStatement } from "@/lib/db/operations/statement-guard";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { quoteLiteral } from "@/lib/sql/values";
@@ -81,6 +81,49 @@ describe("composeCatalogRead — PostgreSQL", () => {
     // The projection is per table: the column names sit only inside the aggregated
     // object, never as top-level select items.
     expect(sql).not.toContain("column_name, data_type, is_nullable");
+  });
+
+  test("excludes the engine's own schemas the provider's browser already excludes (B76)", () => {
+    const sql = composeCatalogRead("postgres", {});
+
+    // The full engine-builtin list, not just pg_catalog/information_schema: a
+    // TimescaleDB chunk schema and Cloudberry's gp_toolkit are grounding noise too.
+    for (const schema of [
+      "pg_toast",
+      "mz_catalog",
+      "crdb_internal",
+      "pg_extension",
+      "_timescaledb_internal",
+      "gp_toolkit",
+      "pg_ext_aux",
+    ]) {
+      expect(sql, schema).toContain(`'${schema}'`);
+    }
+  });
+
+  test("excludes schemas an extension created, by ownership and not by name (B76)", () => {
+    const sql = composeCatalogRead("postgres", {});
+
+    expect(sql).toContain("pg_depend");
+    expect(sql).toContain("'pg_namespace'::regclass");
+    expect(sql).toContain("deptype = 'e'");
+  });
+
+  test("excludes relations an extension created, so AlloyDB's public extension views drop out (B76)", () => {
+    const sql = composeCatalogRead("postgres", {});
+
+    // The sharp case: no schema filter reaches an object installed into `public`.
+    expect(sql).toContain("(table_schema, table_name) NOT IN");
+    expect(sql).toContain("'pg_class'::regclass");
+    expect(sql).toContain("deptype = 'e'");
+  });
+
+  test("does not use a blanket table_type filter, so a user's own views survive (B76)", () => {
+    const sql = composeCatalogRead("postgres", {});
+
+    // A table_type filter would also drop the user's views. The ownership test
+    // drops only what an extension created.
+    expect(sql).not.toContain("table_type");
   });
 });
 
@@ -1013,5 +1056,40 @@ describe("the composers are reachable, which is the defect that put this file he
       expect(() => composeCatalogRead("duckdb", { kind }), kind).not.toThrow(AgentComposedSqlError);
     }
     expect(() => composeEstimatingExplain("duckdb", "SELECT 1")).not.toThrow(AgentComposedSqlError);
+  });
+});
+
+describe("composeCatalogRead — the agent's exclusion set cannot drift from the provider's (B76)", () => {
+  const quotedNames = (block: string | undefined): string[] =>
+    block === undefined ? [] : [...block.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+
+  const readSource = (relativePath: string): string => readFileSync(join(process.cwd(), relativePath), "utf8");
+
+  test("POSTGRES_SYSTEM_SCHEMAS is the same list the provider ships", () => {
+    const providerSchemas = quotedNames(
+      /const SYSTEM_SCHEMAS = \[([\s\S]*?)\] as const;/.exec(readSource("src/lib/db/providers/sql/postgres.ts"))?.[1],
+    );
+    const agentSchemas = quotedNames(
+      /const POSTGRES_SYSTEM_SCHEMAS = \[([\s\S]*?)\] as const;/.exec(readSource("src/lib/agent/composed-sql.ts"))?.[1],
+    );
+
+    // Non-vacuity first: a regex that stops matching silently turns both lists
+    // empty and the assertion below into a tautology.
+    expect(providerSchemas.length).toBeGreaterThan(0);
+    expect(agentSchemas).toEqual(providerSchemas);
+  });
+
+  test("the extension-owned schema query is the provider's, verbatim", () => {
+    const providerQuery = /const EXTENSION_OWNED_SCHEMAS_SQL =([\s\S]*?);/.exec(
+      readSource("src/lib/db/providers/sql/postgres.ts"),
+    )?.[1];
+    const agentQuery = /const POSTGRES_EXTENSION_OWNED_SCHEMAS_SQL =([\s\S]*?);/.exec(
+      readSource("src/lib/agent/composed-sql.ts"),
+    )?.[1];
+
+    const normalize = (query: string | undefined): string => (query ?? "").replace(/\s+/g, " ").trim();
+
+    expect(normalize(providerQuery).length).toBeGreaterThan(0);
+    expect(normalize(agentQuery)).toBe(normalize(providerQuery));
   });
 });
