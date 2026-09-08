@@ -440,14 +440,45 @@ describe("captureContextSnapshot — wide PostgreSQL catalogs (B52)", () => {
 
 describe("captureContextSnapshot — the capture excludes each image's own extension objects (B76)", () => {
   const SHAPES = [
-    // TimescaleDB floods through _timescaledb_internal, the chunk schema; the name
-    // list excludes it before any ownership test runs.
-    { name: "TimescaleDB", schema: "_timescaledb_internal", ownedRelation: false },
-    // Cloudberry floods through gp_toolkit's views, excluded the same way.
-    { name: "Cloudberry", schema: "gp_toolkit", ownedRelation: false },
-    // AlloyDB Omni installs its views into public itself, so the relation
-    // ownership test is the only thing that reaches them.
-    { name: "AlloyDB Omni", schema: null, ownedRelation: true },
+    {
+      name: "TimescaleDB",
+      // The fixed schema list is what removes this row.
+      fragment: "'_timescaledb_internal'",
+      extensionRows: [
+        {
+          table_schema: "_timescaledb_internal",
+          table_name: "_hyper_1_1_chunk",
+          columns: [{ name: "time", type: "timestamptz", nullable: "NO" }],
+        },
+      ],
+      excludedBy: (sql: string) => sql.includes("'_timescaledb_internal'"),
+    },
+    {
+      name: "Cloudberry",
+      fragment: "'gp_toolkit'",
+      extensionRows: [
+        {
+          table_schema: "gp_toolkit",
+          table_name: "gp_stats_missing",
+          columns: [{ name: "relname", type: "name", nullable: "YES" }],
+        },
+      ],
+      excludedBy: (sql: string) => sql.includes("'gp_toolkit'"),
+    },
+    {
+      name: "AlloyDB Omni",
+      // public is not a schema to exclude; only the relation ownership test can
+      // reach an object installed there.
+      fragment: "'pg_class'::regclass",
+      extensionRows: [
+        {
+          table_schema: "public",
+          table_name: "google_db_advisor_reports",
+          columns: [{ name: "id", type: "integer", nullable: "NO" }],
+        },
+      ],
+      excludedBy: (sql: string) => sql.includes("'pg_class'::regclass"),
+    },
   ];
 
   test("the column read carries the full engine-schema list and both ownership tests", async () => {
@@ -479,22 +510,28 @@ describe("captureContextSnapshot — the capture excludes each image's own exten
 
   for (const shape of SHAPES) {
     test(`a ${shape.name}-shaped database reaches the fold with its internal objects excluded`, async () => {
-      const h = harness("postgres");
+      const h = harness("postgres", async (sql) => {
+        if (sql.includes("information_schema.columns")) {
+          // The engine applies the composed filter before answering. The harness
+          // mirrors only this shape's own exclusion, so swapping the shapes swaps
+          // the row that is removed — each case is distinct, not a shared string.
+          return result(shape.excludedBy(sql) ? PG_COLUMNS : [...PG_COLUMNS, ...shape.extensionRows]);
+        }
+        return result([]);
+      });
 
-      await captureContextSnapshot(h.context);
+      const capture = await captureContextSnapshot(h.context);
 
+      expect(capture.kind).toBe("captured");
+      if (capture.kind !== "captured") throw new Error("unreachable");
+
+      // The shape-specific fragment is present in the composed column read, and
+      // the fold names only the user's tables — the extension row never survives.
       const columnRead = h.statements().find((sql) => sql.includes("information_schema.columns"));
-      expect(columnRead).toBeDefined();
+      expect(columnRead, shape.name).toBeDefined();
+      expect(columnRead, shape.name).toContain(shape.fragment);
 
-      if (shape.schema !== null) {
-        expect(columnRead, shape.name).toContain(`'${shape.schema}'`);
-      }
-      if (shape.ownedRelation) {
-        // The sharp case: public is not a schema to exclude, so the ownership
-        // test over pg_class is the only mechanism that can reach these views.
-        expect(columnRead, shape.name).toContain("(table_schema, table_name) NOT IN");
-        expect(columnRead, shape.name).toContain("'pg_class'::regclass");
-      }
+      expect(capture.snapshot.tables.map((table) => table.name).sort()).toEqual(["public.customers", "public.orders"]);
     });
   }
 });

@@ -6,6 +6,7 @@ import {
   composeEstimatingExplain,
   composeStatisticsAvailabilityProbe,
   MAX_CATALOG_SELECTOR_LENGTH,
+  withoutExtensionOwnershipTest,
 } from "@/lib/agent/composed-sql";
 import { agentReadSqlInput, inspectAgentStatement } from "@/lib/db/operations/statement-guard";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -124,6 +125,39 @@ describe("composeCatalogRead — PostgreSQL", () => {
     // A table_type filter would also drop the user's views. The ownership test
     // drops only what an extension created.
     expect(sql).not.toContain("table_type");
+  });
+
+  test("every PostgreSQL kind carries the relation ownership test (B76)", () => {
+    for (const kind of ["columns", "relations", "indexes", "statistics"] as const) {
+      const sql = composeCatalogRead("postgres", { kind });
+
+      // The relation test is the only thing in any composed statement that names
+      // `pg_class` ownership, so its presence is what pins the test to the kind.
+      expect(sql, kind).toContain("'pg_class'::regclass");
+      expect(sql, kind).toContain("deptype = 'e'");
+      expect(guardAccepts(sql), kind).toBe(true);
+    }
+  });
+
+  test("the extension ownership tests strip down to the fixed schema list (Materialize fallback)", () => {
+    for (const kind of ["columns", "relations", "indexes", "statistics"] as const) {
+      const sql = composeCatalogRead("postgres", { kind });
+      const stripped = withoutExtensionOwnershipTest(sql);
+
+      // The ownership joins are gone, the fixed list remains, and the stripped
+      // statement is still one the bounded-read guard admits. `pg_extension` stays
+      // as a schema name in the fixed list (CockroachDB); the JOIN against it is
+      // what must disappear.
+      expect(stripped, kind).not.toContain("pg_depend");
+      expect(stripped, kind).not.toContain("regclass");
+      expect(stripped, kind).not.toContain("JOIN pg_extension");
+      expect(stripped, kind).toContain("'pg_catalog'");
+      expect(guardAccepts(stripped), kind).toBe(true);
+    }
+  });
+
+  test("stripping a statement without the ownership tests is a no-op", () => {
+    expect(withoutExtensionOwnershipTest("SELECT 1")).toBe("SELECT 1");
   });
 });
 

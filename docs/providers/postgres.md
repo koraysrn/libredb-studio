@@ -1085,14 +1085,15 @@ Four things about the PostgreSQL side of that layer are worth knowing here:
 - **The catalog read is a composed bounded read**, not a new operation. `inspect_schema` takes a
   schema/table selector and the server writes the `columns` statement itself, executed as
   `sql.query.read` like any other statement. The model never supplies that SQL. The statement's
-  `WHERE` excludes the engine's own objects three ways, all copied from this provider's object
-  browser rather than invented on the agent path: the full engine-builtin schema list (not only
-  `pg_catalog` / `information_schema`), every schema an extension created (`pg_depend` on
-  `pg_namespace`, `deptype = 'e'`), and every relation an extension created (`pg_depend` on
-  `pg_class`, `deptype = 'e'`). The relation test is the one that reaches AlloyDB Omni's extension
-  views, 49 of which sit in `public` itself where no schema filter can reach them; a user's own views
-  are never extension-owned, so they stay in the inventory. Measured live on 2026-09-07 with two user
-  tables seeded: 46 → 2 object rows on TimescaleDB, 67 → 2 on Cloudberry and 70 → 2 on AlloyDB Omni.
+  `WHERE` excludes the engine's own objects three ways: the full engine-builtin schema list (not
+  only `pg_catalog` / `information_schema`) and every schema an extension created (`pg_depend` on
+  `pg_namespace`, `deptype = 'e'`) — both copied from this provider's object browser — plus every
+  relation an extension created (`pg_depend` on `pg_class`, `deptype = 'e'`), which is new on the
+  agent path and carried by all four catalog reads, not only the column one. The relation test is
+  the one that reaches AlloyDB Omni's extension views, 49 of which sit in `public` itself where no
+  schema filter can reach them; a user's own views are never extension-owned, so they stay in the
+  inventory. Measured live on 2026-09-07 with two user tables seeded: 46 → 2 object rows on
+  TimescaleDB, 67 → 2 on Cloudberry and 70 → 2 on AlloyDB Omni.
   Selectors are quoted with `quoteLiteral` because `queryReadOnly` binds no parameters, and a selector
   carrying a backslash is refused outright rather than quoted — the dialect-less span reader treats it
   as an escape, so `'a\'` would read as an unterminated literal.

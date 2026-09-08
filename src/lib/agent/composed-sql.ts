@@ -238,6 +238,36 @@ function postgresSchemaExclusion(column: string): string {
 }
 
 /**
+ * The relation-level ownership test for one (schema, table) pair. Every
+ * PostgreSQL catalog read carries it, so `inspect_schema` answers the same
+ * object set whatever `kind` it is asked for: a relation an extension created
+ * is absent from columns, indexes, statistics and relations alike, and only a
+ * user's own objects survive.
+ */
+function postgresRelationExclusion(schemaColumn: string, tableColumn: string): string {
+  return `(${schemaColumn}, ${tableColumn}) NOT IN (${POSTGRES_EXTENSION_OWNED_RELATIONS_SQL})`;
+}
+
+/**
+ * The same statement with both ownership tests removed, leaving the fixed
+ * engine-builtin schema list alone. This is the agent-side mirror of the
+ * provider's `withoutExtensionOwnershipTest`: a postgres-typed connection to an
+ * engine with no `pg_depend`/`pg_extension` catalogs (Materialize) raises on
+ * those names, and the read retries without the ownership tests. Kept as a pure
+ * string rewrite so the caller decides when to use it.
+ */
+export function withoutExtensionOwnershipTest(sql: string): string {
+  const withoutSchemas = sql.replace(
+    /\s+AND\s+[\w.]+ NOT IN \(SELECT n\.nspname FROM pg_namespace n JOIN pg_depend[^)]*\)/g,
+    "",
+  );
+  return withoutSchemas.replace(
+    /\s+AND\s+\([\w.]+,\s*[\w.]+\) NOT IN \(SELECT n\.nspname,\s*c\.relname FROM pg_class c JOIN pg_namespace n[^)]*\)/g,
+    "",
+  );
+}
+
+/**
  * The column inventory, one row per TABLE with its columns aggregated (B52).
  *
  * The projection used to be one row per COLUMN. Against `maxResultRows: 200` that
@@ -275,20 +305,21 @@ function postgresSchemaExclusion(column: string): string {
  *
  * This change closes B76: the aggregation that fixed the wide-catalog refusal
  * then admitted the image's own objects. The WHERE clause below now excludes
- * them two ways, both taken from the provider's object browser rather than
- * invented here — the full engine-builtin schema list plus every schema an
- * extension created, AND every RELATION an extension created (`pg_depend` with
- * `classid = 'pg_class'::regclass`). The relation test is the load-bearing half
- * on AlloyDB Omni, whose 67 extension views mostly sit in `public` itself: no
- * schema filter can reach them, an ownership test can, and a user's own views
- * are never extension-owned so they survive.
+ * them three ways — the full engine-builtin schema list plus every schema an
+ * extension created (both copied from the provider's object browser), AND every
+ * RELATION an extension created (`pg_depend` with `classid = 'pg_class'::regclass`,
+ * new on the agent path). The relation test is the load-bearing half on AlloyDB
+ * Omni, whose 67 extension views mostly sit in `public` itself: no schema
+ * filter can reach them, an ownership test can, and a user's own views are
+ * never extension-owned so they survive.
  *
- * Only the COLUMN read carries all three tests. The relation, index and
- * statistics reads filter by schema alone, and that is complete rather than a
- * gap: `buildPostgresTables` attaches a relation or index row to a table that
- * is already in the column inventory, so a row for an extension-owned object
- * the column read excluded has nothing to attach to and is dropped by the
- * fold. The column read is the single source of object identity.
+ * Every PostgreSQL catalog read carries the relation test, not only this one:
+ * `inspect_schema` serves `indexes`, `statistics` and `relations` straight to
+ * the model without passing them through `buildPostgresTables`, so a read that
+ * filtered by schema alone would show a PostGIS-owned `spatial_ref_sys` in the
+ * index and statistics inventories while hiding it from the column inventory.
+ * The exclusion is applied where each statement identifies its own table, and
+ * the four reads agree on the object set.
  *
  * Measured live on 2026-09-07 against the three `compat` images with two user
  * tables seeded: the column read answers 46 → 2 object rows on TimescaleDB,
@@ -307,7 +338,7 @@ function composePostgresCatalog(selector: AgentCatalogSelector): string {
     "ORDER BY ordinal_position) AS columns " +
     "FROM information_schema.columns " +
     `WHERE ${postgresSchemaExclusion("table_schema")}` +
-    ` AND (table_schema, table_name) NOT IN (${POSTGRES_EXTENSION_OWNED_RELATIONS_SQL})` +
+    ` AND ${postgresRelationExclusion("table_schema", "table_name")}` +
     equalsClause("table_schema", selector.schema, "schema", "postgres") +
     equalsClause("table_name", selector.table, "table", "postgres") +
     " GROUP BY table_schema, table_name ORDER BY table_schema, table_name"
@@ -363,6 +394,7 @@ function composePostgresRelations(selector: AgentCatalogSelector): string {
     "JOIN pg_attribute fatt ON fatt.attrelid = c.confrelid AND fatt.attnum = k.fattnum " +
     "WHERE c.contype = 'f' AND " +
     postgresSchemaExclusion("rn.nspname") +
+    ` AND ${postgresRelationExclusion("rn.nspname", "rel.relname")}` +
     equalsClause("rn.nspname", selector.schema, "schema", "postgres") +
     equalsClause("rel.relname", selector.table, "table", "postgres") +
     " ORDER BY rn.nspname, rel.relname, k.ord"
@@ -415,6 +447,7 @@ function composePostgresIndexes(selector: AgentCatalogSelector): string {
     "JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true " +
     "LEFT JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = k.attnum " +
     `WHERE ${postgresSchemaExclusion("n.nspname")}` +
+    ` AND ${postgresRelationExclusion("n.nspname", "t.relname")}` +
     equalsClause("n.nspname", selector.schema, "schema", "postgres") +
     equalsClause("t.relname", selector.table, "table", "postgres") +
     " ORDER BY n.nspname, t.relname, i.relname, k.ord"
@@ -469,6 +502,7 @@ function composePostgresStatistics(selector: AgentCatalogSelector): string {
     "WHERE c.relkind IN ('r', 'p') " +
     "AND " +
     postgresSchemaExclusion("n.nspname") +
+    ` AND ${postgresRelationExclusion("n.nspname", "c.relname")}` +
     equalsClause("n.nspname", selector.schema, "schema", "postgres") +
     equalsClause("c.relname", selector.table, "table", "postgres") +
     " ORDER BY n.nspname, c.relname, s.attname"
