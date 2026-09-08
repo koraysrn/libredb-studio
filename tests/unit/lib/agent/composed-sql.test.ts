@@ -139,7 +139,7 @@ describe("composeCatalogRead — PostgreSQL", () => {
     }
   });
 
-  test("the extension ownership tests strip down to the fixed schema list (Materialize fallback)", () => {
+  test("the extension ownership tests strip down to the fixed schema list (fallback for unprobed engines)", () => {
     for (const kind of ["columns", "relations", "indexes", "statistics"] as const) {
       const sql = composeCatalogRead("postgres", { kind });
       const stripped = withoutExtensionOwnershipTest(sql);

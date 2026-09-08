@@ -2825,6 +2825,38 @@ describe("the grounding seam — the server's own read, outside agent mode", () 
   });
 });
 
+describe("readCatalog — the extension-ownership fallback retry", () => {
+  test("a database error naming pg_depend retries once without the ownership tests", async () => {
+    let attempts = 0;
+    const h = harness({}, async () => {
+      attempts += 1;
+      if (attempts === 1) throw new QueryError('relation "pg_depend" does not exist', "postgres");
+      return queryResult();
+    });
+
+    const outcome = await readCatalogForGrounding(h.context, {});
+
+    expect(outcome.kind).toBe("completed");
+    expect(h.queryReadOnly).toHaveBeenCalledTimes(2);
+    const first = h.queryReadOnly.mock.calls[0][0] as string;
+    const second = h.queryReadOnly.mock.calls[1][0] as string;
+    expect(first).toContain("pg_depend");
+    expect(second).not.toContain("pg_depend");
+    expect(second).toContain("information_schema.columns");
+  });
+
+  test("a database error that does not name those catalogs is not retried", async () => {
+    const h = harness({}, async () => {
+      throw new QueryError('column "ordr_id" does not exist', "postgres");
+    });
+
+    const outcome = await readCatalogForGrounding(h.context, {});
+
+    expect(outcome.kind).toBe("refused");
+    expect(h.queryReadOnly).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("inspectPlanTool — the estimating variant only", () => {
   test("composes the estimating EXPLAIN for the connection's dialect", async () => {
     const h = harness();

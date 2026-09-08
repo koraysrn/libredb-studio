@@ -2274,9 +2274,10 @@ export async function readStatementForGrounding(
 
 /**
  * Whether a database error names the two catalogs the extension ownership tests
- * join against. A postgres-typed connection can reach an engine without them
- * (Materialize), and the catalog read then retries without the ownership tests —
- * the same decision the provider makes in `isMissingExtensionCatalogError`.
+ * join against. A postgres-typed connection can reach an engine the driver
+ * serves but nobody here has run, and one without those catalogs raises on
+ * them; the catalog read then retries without the ownership tests — the same
+ * decision the provider makes in `isMissingExtensionCatalogError`.
  */
 function isMissingExtensionCatalogError(message: string): boolean {
   const lowered = message.toLowerCase();
@@ -2332,10 +2333,10 @@ async function readCatalog(
   };
   let outcome = await executeAgentOperation(context, request);
 
-  // A postgres-typed connection can reach an engine without the two catalogs the
-  // ownership tests join against (Materialize raises on pg_depend/pg_extension).
-  // The provider drops the tests on that error and retries with the fixed schema
-  // list alone; mirror that here for the agent path.
+  // A postgres-typed connection can reach an engine the driver serves but nobody
+  // here has run, one without the two catalogs the ownership tests join against
+  // (it raises on pg_depend/pg_extension). The provider drops the tests on that
+  // error and retries with the fixed schema list alone; mirror it here.
   if (
     context.connection.type === "postgres" &&
     outcome.kind === "refused" &&

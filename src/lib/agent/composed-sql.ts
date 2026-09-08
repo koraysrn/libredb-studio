@@ -251,10 +251,10 @@ function postgresRelationExclusion(schemaColumn: string, tableColumn: string): s
 /**
  * The same statement with both ownership tests removed, leaving the fixed
  * engine-builtin schema list alone. This is the agent-side mirror of the
- * provider's `withoutExtensionOwnershipTest`: a postgres-typed connection to an
- * engine with no `pg_depend`/`pg_extension` catalogs (Materialize) raises on
- * those names, and the read retries without the ownership tests. Kept as a pure
- * string rewrite so the caller decides when to use it.
+ * provider's `withoutExtensionOwnershipTest`: the driver serves PostgreSQL-wire
+ * engines nobody here has run, and one without `pg_depend`/`pg_extension`
+ * raises on those names, so the read retries with the fixed list alone. Kept as
+ * a pure string rewrite so the caller decides when to use it.
  */
 export function withoutExtensionOwnershipTest(sql: string): string {
   const withoutSchemas = sql.replace(
