@@ -2676,25 +2676,6 @@ the entry cannot tell what the model is actually driven with.
 **Done when:** the gate tests the stopping text and the affected cells are re-measured, or the
 two switches become one setting whose name covers both stops.
 
----
-
-### B67. There is no run history across conversations
-
-A run now belongs to a conversation, the rail names the one it continues and offers to leave it,
-and the steps of THAT conversation are listed from the run's own header. What is left of B36's
-"larger shape" is everything outside it: a user cannot see the conversations they had yesterday,
-cannot return to one, and cannot open an earlier step's report.
-
-The reason it is a separate entry rather than more of the same work is a measurement. Listing the
-current conversation needs no new infrastructure — each run's header carries its own prefix, so the
-chain is self-describing and `GET /api/agent/runs/{runId}` already serves any step. Listing ALL of a
-user's runs has nothing behind it at all: `run-store.ts` has no enumeration, there is no list route,
-and the two questions that follow immediately — pagination and retention — have not been asked. It
-is a persistence surface, not a rail change.
-
-**Done when:** a user can see their earlier conversations and open one, with the store's
-enumeration, the route and the retention rule each decided rather than inherited.
-
 ### B70. A run writes no summary for the step after it
 
 The conversation a run is handed carries the previous step's report as its CLAIMS — what the model
