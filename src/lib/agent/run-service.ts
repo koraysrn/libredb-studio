@@ -485,7 +485,7 @@ export class AgentRunService {
   }
 
   /**
-   * The finished conversations this actor can reopen (#B67).
+   * The finished conversations this actor can reopen (#830).
    *
    * Scoped by the caller's session id, which the route supplies from the
    * verified session — the same `actor.sessionId` every run record carries, so

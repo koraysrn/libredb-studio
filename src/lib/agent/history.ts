@@ -1,6 +1,6 @@
 /**
  * The run-history index: one append-only stream per actor, folded into the
- * conversation list the history surface reads (#B67).
+ * conversation list the history surface reads (#830).
  *
  * The run ledger itself has no enumeration — every stream method is addressed by
  * a run id, and nothing lists ids. The history index is the enumeration: when a

@@ -1046,7 +1046,7 @@ describe("AgentRunService — drive ownership", () => {
   });
 });
 
-// ─── run history (#B67) ────────────────────────────────────────────────────
+// ─── run history (#830) ────────────────────────────────────────────────────
 
 describe("AgentRunService — run history", () => {
   test("finishing a run indexes it for the actor, and the service lists it back", async () => {

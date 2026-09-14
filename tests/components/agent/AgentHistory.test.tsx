@@ -8,7 +8,7 @@ import type { AgentRunRecord } from "@/lib/agent/types";
 import { mockGlobalFetch, restoreGlobalFetch, type MockFetchResponse } from "../../helpers/mock-fetch";
 
 /**
- * The run history panel (#B67): the finished conversations this session can
+ * The run history panel (#830): the finished conversations this session can
  * reopen, and the report of any one step read back on demand.
  */
 

@@ -40,7 +40,7 @@ None of it is a GitHub issue.
 - [Security Phase 2 deferrals](#security-phase-2-deferrals) — C3–C11 · 7
 - [Security Phase 3 deferrals](#security-phase-3-deferrals) — K4
 - [Agent M1 deferrals (#328)](#agent-m1-deferrals-328) — A1–A5 · 4
-- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2–B81 · 25
+- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2–B81 · 24
 
 ---
 

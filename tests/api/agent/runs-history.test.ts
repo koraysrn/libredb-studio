@@ -1,5 +1,5 @@
 /**
- * `GET /api/agent/runs` — the run history list route (#B67).
+ * `GET /api/agent/runs` — the run history list route (#830).
  *
  * Pinned here rather than folded into `runs.test.ts` because that file mocks
  * `@/lib/agent/runtime` for the start/status/cancel surface, and this route

@@ -140,7 +140,7 @@ function badRequest(message: string, refused?: AgentStartRefusalCode): NextRespo
 }
 
 /**
- * The finished conversations this session can reopen, newest first (#B67).
+ * The finished conversations this session can reopen, newest first (#830).
  *
  * The list is scoped to the verified session — `guardRoute` above — and the
  * session id is the one a run's `actor.sessionId` records, so one user can only

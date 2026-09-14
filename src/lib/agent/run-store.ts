@@ -565,7 +565,7 @@ export class AgentRunStore {
   }
 
   /**
-   * Appends one finished run to the actor's history index (#B67).
+   * Appends one finished run to the actor's history index (#830).
    *
    * Written by `run-service.ts`'s `finalize` — the single path every terminal
    * run goes through — and never from `openRun`: a run that is still queued or

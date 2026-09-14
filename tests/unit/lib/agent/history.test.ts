@@ -11,7 +11,7 @@ import {
 import type { AgentConversationSummary } from "@/lib/agent/types";
 
 /**
- * The run-history index (#B67), as pure functions over entries and the page
+ * The run-history index (#830), as pure functions over entries and the page
  * slice. These are the parts of the feature that do not touch the durable
  * backend, so they are tested here against fixtures rather than against a world.
  */

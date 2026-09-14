@@ -7,7 +7,7 @@ import { AGENT_HISTORY_PAGE_DEFAULT } from "@/lib/agent/execution-policy";
 import type { AgentConversationSummary, AgentRunRecord } from "@/lib/agent/types";
 
 /**
- * The run history panel (#B67): the finished conversations this session can
+ * The run history panel (#830): the finished conversations this session can
  * reopen, newest first, and the report of any one step, read back on demand.
  *
  * It is deliberately a sibling of the live rail rather than part of `useAgentRun`:
@@ -127,7 +127,10 @@ export function AgentHistory() {
   const [report, setReport] = useState<{ readonly runId: string; readonly view: ReportView } | null>(null);
   const [loadingReport, setLoadingReport] = useState<string | null>(null);
 
-  const nextCursor = useRef<string | null>(null);
+  // The cursor for the page after the current one. State rather than a ref:
+  // whether to offer "Load more" is RENDERED, so it has to be reactive — a ref
+  // read during render is exactly the access the compiler lint refuses.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const loadingMore = useRef(false);
   // The run id of the most recently requested report. `openReport` checks this
   // before applying a response, so a slow reply to an earlier request cannot
@@ -154,7 +157,7 @@ export function AgentHistory() {
         return;
       }
       const page = readConversations(payload);
-      nextCursor.current = readNextCursor(payload);
+      setNextCursor(readNextCursor(payload));
       setConversations((current) => (append ? [...current, ...page] : page));
       setState("ready");
     } catch {
@@ -352,11 +355,11 @@ export function AgentHistory() {
         </ol>
       )}
 
-      {nextCursor.current !== null && conversations.length > 0 && state === "ready" && (
+      {nextCursor !== null && conversations.length > 0 && state === "ready" && (
         <button
           type="button"
           data-testid="agent-history-more"
-          onClick={() => void load(nextCursor.current, true)}
+          onClick={() => void load(nextCursor, true)}
           className="w-full rounded px-2 py-1 text-[0.625rem] text-brand-bright hover:bg-fill transition-colors"
         >
           Load more
