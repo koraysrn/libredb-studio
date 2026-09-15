@@ -81,7 +81,9 @@ describe("parseHistoryEntry", () => {
   });
 
   test("returns null for an entry of another kind, which is how a newer build's line is skipped", () => {
-    expect(parseHistoryEntry(JSON.stringify({ kind: "history-opened" }))).toBeNull();
+    // Every field is valid except `kind`: what rejects the line is the kind
+    // check, not the missing-field checks that would reject any bare object.
+    expect(parseHistoryEntry(JSON.stringify({ ...entry(), kind: "history-opened" }))).toBeNull();
   });
 
   test.each<[string, Record<string, unknown>]>([

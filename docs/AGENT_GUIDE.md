@@ -20,27 +20,16 @@ needs the mechanism behind it, it links there instead of restating it.
 
 ## Contents
 
-- [The agent, for the person using it](#the-agent-for-the-person-using-it)
-  - [Contents](#contents)
-  - [Where the agent is](#where-the-agent-is)
-  - [What a run is](#what-a-run-is)
-    - [What a Plan run knows about your database](#what-a-plan-run-knows-about-your-database)
-  - [The four workflows](#the-four-workflows)
-    - [Investigate](#investigate)
-    - [Optimize](#optimize)
-    - [Assess](#assess)
-    - [Operate](#operate)
-  - [What you see while a run goes](#what-you-see-while-a-run-goes)
-  - [Auto-execute: when the run runs the answer in your editor](#auto-execute-when-the-run-runs-the-answer-in-your-editor)
-  - [What "answered" means](#what-answered-means)
-  - [The budget meter's numbers](#the-budget-meters-numbers)
-  - [When the model is refused](#when-the-model-is-refused)
-  - [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
-    - [What was measured](#what-was-measured)
-  - [Returning to earlier conversations](#returning-to-earlier-conversations)
-  - [What the agent does not do](#what-the-agent-does-not-do)
-
----
+- [Where the agent is](#where-the-agent-is)
+- [What a run is](#what-a-run-is)
+- [The four workflows](#the-four-workflows)
+- [What you see while a run goes](#what-you-see-while-a-run-goes)
+- [What "answered" means](#what-answered-means)
+- [The budget meter's numbers](#the-budget-meters-numbers)
+- [When the model is refused](#when-the-model-is-refused)
+- [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
+- [Returning to earlier conversations](#returning-to-earlier-conversations)
+- [What the agent does not do](#what-the-agent-does-not-do)
 
 ## Where the agent is
 

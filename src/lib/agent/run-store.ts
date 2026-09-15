@@ -429,6 +429,17 @@ function foldLedger(runId: string, entries: readonly AgentLedgerEntry[]): AgentR
 const closedStreams = new Set<string>();
 
 /**
+ * How many chunks one whole-stream read asks for per page.
+ *
+ * The world's default page is 100, and `world-local` re-lists the chunk
+ * directory and re-skips every earlier file on EACH call — so a default-page
+ * read of N chunks is quadratic in the number of pages, not in the bytes. One
+ * large page keeps a 10 000-entry history index to a handful of round trips
+ * instead of a hundred re-walks.
+ */
+const STREAM_CHUNK_PAGE_SIZE = 1000;
+
+/**
  * The run ledger. One instance per process is enough: it holds no run state of
  * its own, only the world it writes through.
  */
@@ -625,7 +636,11 @@ export class AgentRunStore {
     const chunks: Uint8Array[] = [];
     let cursor: string | undefined;
     do {
-      const page = await this.world.getStreamChunks(name, "", cursor === undefined ? {} : { cursor });
+      const page = await this.world.getStreamChunks(
+        name,
+        "",
+        cursor === undefined ? { limit: STREAM_CHUNK_PAGE_SIZE } : { limit: STREAM_CHUNK_PAGE_SIZE, cursor },
+      );
       for (const chunk of page.data) chunks.push(chunk.data);
       cursor = page.hasMore && page.cursor !== null ? page.cursor : undefined;
     } while (cursor !== undefined);

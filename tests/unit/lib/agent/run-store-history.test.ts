@@ -271,9 +271,9 @@ describe("AgentRunStore — the history index", () => {
     // The stream holds 10 000 lines; the fold parses them all and then applies
     // the retention cap, so the LISTING is bounded (50) even though the READ is
     // not — the listing cost is O(entries), which is the documented limit. The
-    // measured list latency here is ~56 s on a dev machine, dominated by the
-    // backend reading 10 000 chunk files; the bound below only catches a
-    // catastrophic regression rather than asserting a fast path.
+    // store reads in 1 000-chunk pages (`STREAM_CHUNK_PAGE_SIZE`), so the read is
+    // a handful of directory walks rather than a re-walk per 100-chunk page; the
+    // bound below catches a catastrophic regression, not a fast path.
     expect(page.conversations).toHaveLength(50);
     expect(elapsed).toBeLessThan(120_000);
   }, 120_000);

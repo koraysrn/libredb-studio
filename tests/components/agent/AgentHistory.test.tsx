@@ -228,6 +228,32 @@ describe("AgentHistory", () => {
     expect(await screen.findByText("That run could not be reopened.")).toBeDefined();
   });
 
+  test("a successful reopen clears the failure sentence of the report before it", async () => {
+    let fail = true;
+    mockGlobalFetch({
+      "/api/agent/runs/arun_t_1": async () => {
+        if (fail) {
+          fail = false;
+          return { ok: false, status: 404, json: { error: "No such agent run" } };
+        }
+        return json({ record: reportRecord(), cancellationRequested: false });
+      },
+      "/api/agent/runs": json(conversationPayload),
+    });
+    render(<AgentHistory />);
+
+    const item = await screen.findByText("Why is checkout slow?");
+    fireEvent.click(item);
+    expect(await screen.findByText("That run could not be reopened.")).toBeDefined();
+
+    // Collapse, then reopen the same step: the second read succeeds and must
+    // clear the sentence the first one left, not leave it over a healthy report.
+    fireEvent.click(item);
+    fireEvent.click(item);
+    expect(await screen.findByText(/scans the whole orders table/)).toBeDefined();
+    expect(screen.queryByText("That run could not be reopened.")).toBeNull();
+  });
+
   test("a report payload without a record says so rather than reading one", async () => {
     mockGlobalFetch({
       "/api/agent/runs/arun_t_1": json({ cancellationRequested: false }),
@@ -323,6 +349,9 @@ describe("AgentHistory", () => {
 
     fireEvent.click(await screen.findByText("Load more"));
     expect(await screen.findByText("Chart those.")).toBeDefined();
+    // Append, not replace: the first page's conversation stays listed under the
+    // one the second page added.
+    expect(screen.getByText("Why is checkout slow?")).toBeDefined();
   });
 });
 

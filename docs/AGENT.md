@@ -90,38 +90,21 @@ Two companion pages carry what this one deliberately does not:
 
 ## Table of Contents
 
-- [Agent Runtime — LibreDB Studio](#agent-runtime--libredb-studio)
-  - [Table of Contents](#table-of-contents)
-  - [Turning it on](#turning-it-on)
-  - [What a run is](#what-a-run-is)
-    - [The conversation a run belongs to](#the-conversation-a-run-belongs-to)
-    - [What a plan run knows](#what-a-plan-run-knows)
-    - [What the inventory is an inventory OF](#what-the-inventory-is-an-inventory-of)
-    - [The statement a plan run drafts](#the-statement-a-plan-run-drafts)
-  - [Durability and resume](#durability-and-resume)
-    - [A drive that dies before the loop](#a-drive-that-dies-before-the-loop)
-  - [The tool set](#the-tool-set)
-    - [The query-optimization template](#the-query-optimization-template)
-    - [The database-assessment template](#the-database-assessment-template)
-    - [The operations template](#the-operations-template)
-    - [The data-analysis template](#the-data-analysis-template)
-    - [Presenting an answer](#presenting-an-answer)
-    - [Handing the answer to the editor (auto-execute)](#handing-the-answer-to-the-editor-auto-execute)
-    - [What the fence is proved to hold against](#what-the-fence-is-proved-to-hold-against)
-  - [What bounds a run](#what-bounds-a-run)
-  - [Supported models](#supported-models)
-  - [The model side](#the-model-side)
-    - [What a refused model looks like in the app](#what-a-refused-model-looks-like-in-the-app)
-  - [Whether the run answered](#whether-the-run-answered)
-    - [The eval harness](#the-eval-harness)
-  - [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
-  - [HTTP surface](#http-surface)
-  - [The surface in the app](#the-surface-in-the-app)
-  - [Deployment](#deployment)
-  - [Package boundary](#package-boundary)
-  - [Module map](#module-map)
-  - [Known limitations](#known-limitations)
-  - [Related documentation](#related-documentation)
+- [Turning it on](#turning-it-on)
+- [What a run is](#what-a-run-is)
+- [Durability and resume](#durability-and-resume)
+- [The tool set](#the-tool-set)
+- [What bounds a run](#what-bounds-a-run)
+- [Supported models](#supported-models)
+- [The model side](#the-model-side)
+- [Whether the run answered](#whether-the-run-answered)
+- [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
+- [HTTP surface](#http-surface)
+- [The surface in the app](#the-surface-in-the-app)
+- [Deployment](#deployment)
+- [Package boundary](#package-boundary)
+- [Module map](#module-map)
+- [Known limitations](#known-limitations)
 
 ## Turning it on
 
@@ -2692,10 +2675,10 @@ need a work item to hold that record.
   still finishes and stays reopenable by id, but it is missing from the History listing, and nothing
   rebuilds the index afterwards (a resume that finishes again would append it). `AGENT_HISTORY_MAX_CONVERSATIONS`
   is a listing bound, not storage retention: the index stream is append-only and grows with every
-  finished run, while the listing folds it and keeps the newest 50 conversations. The listing cost is
-  O(entries) rather than O(kept): a 10 000-entry index lists in ~56 s on a dev machine (measured by
-  `tests/unit/lib/agent/run-store-history.test.ts`), dominated by the backend reading that many chunk
-  files, so the index is a pointer list and not a query table.
+  finished run, while the listing folds it and keeps the newest 50 conversations. The listing reads
+  the whole stream in 1 000-chunk pages rather than the world's default 100, because each page makes
+  the backend re-list the chunk directory and re-skip every earlier file — the default would make the
+  read quadratic in the page count, not in the bytes. It is a pointer list and not a query table.
 
 ## Related documentation
 

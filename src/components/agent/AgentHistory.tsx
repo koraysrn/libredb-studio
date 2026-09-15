@@ -180,6 +180,11 @@ export function AgentHistory() {
     latestReportRequest.current = runId;
     setLoadingReport(runId);
     setReport(null);
+    // The error line is shared by the list loader and the report loader, so a
+    // fresh open clears the previous report's failure sentence before this one
+    // is read — a report that failed once must not stand over the healthy one
+    // now being opened.
+    setError(null);
     const isCurrent = (): boolean => latestReportRequest.current === runId;
     try {
       const res = await appFetch(`/api/agent/runs/${encodeURIComponent(runId)}`);
