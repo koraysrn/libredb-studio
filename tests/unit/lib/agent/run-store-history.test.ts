@@ -49,7 +49,10 @@ afterEach(() => {
     const dir = dataDirs.pop();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   }
-});
+  // The 10 000-entry test leaves 10 000 chunk files behind, and deleting them
+  // all on a Windows runner exceeds bun's default hook timeout — the hook is the
+  // slow part, not the test, so it gets the same generous bound as the test.
+}, 120_000);
 
 describe("AgentRunStore — the history index", () => {
   test("records a finished run and lists it back as one conversation", async () => {
