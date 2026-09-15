@@ -1211,7 +1211,7 @@ accept, a single line, a range and a comma pair, and one negative that fails whe
 
 ### D85. The `@/lib/auth` mock is hand-copied across a layer, untyped, and already misses two exports
 
-`grep -rl 'mock.module("@/lib/auth"' tests/` returns exactly 36 hits, measured 2026-09-15. Five of
+`grep -rl 'mock.module("@/lib/auth"' tests/` returns exactly 37 hits, measured 2026-09-15. Six of
 them spread the real module and replace one function (`{ ...realAuth, getSession: mockGetSession }`,
 the agent routes' pattern). Twenty-nine write out the same five-key object - `getSession`, `signJWT`,
 `verifyJWT`, `login`, `logout` - down to the same `mock(async () => "mock-token")` for a token
