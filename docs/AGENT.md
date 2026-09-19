@@ -91,36 +91,38 @@ Two companion pages carry what this one deliberately does not:
 
 ## Table of Contents
 
-- [Turning it on](#turning-it-on)
-- [What a run is](#what-a-run-is)
-  - [The conversation a run belongs to](#the-conversation-a-run-belongs-to)
-  - [What a plan run knows](#what-a-plan-run-knows)
-  - [What the inventory is an inventory OF](#what-the-inventory-is-an-inventory-of)
-  - [The statement a plan run drafts](#the-statement-a-plan-run-drafts)
-- [Durability and resume](#durability-and-resume)
-  - [A drive that dies before the loop](#a-drive-that-dies-before-the-loop)
-- [The tool set](#the-tool-set)
-  - [The query-optimization template](#the-query-optimization-template)
-  - [The database-assessment template](#the-database-assessment-template)
-  - [The operations template](#the-operations-template)
-  - [The data-analysis template](#the-data-analysis-template)
-  - [Presenting an answer](#presenting-an-answer)
-  - [Handing the answer to the editor (auto-execute)](#handing-the-answer-to-the-editor-auto-execute)
-  - [What the fence is proved to hold against](#what-the-fence-is-proved-to-hold-against)
-- [What bounds a run](#what-bounds-a-run)
-- [Supported models](#supported-models)
-- [The model side](#the-model-side)
-  - [What a refused model looks like in the app](#what-a-refused-model-looks-like-in-the-app)
-- [Whether the run answered](#whether-the-run-answered)
-  - [The eval harness](#the-eval-harness)
-- [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
-- [HTTP surface](#http-surface)
-- [The surface in the app](#the-surface-in-the-app)
-- [Deployment](#deployment)
-- [Package boundary](#package-boundary)
-- [Module map](#module-map)
-- [Known limitations](#known-limitations)
-- [Related documentation](#related-documentation)
+- [Agent Runtime — LibreDB Studio](#agent-runtime--libredb-studio)
+  - [Table of Contents](#table-of-contents)
+  - [Turning it on](#turning-it-on)
+  - [What a run is](#what-a-run-is)
+    - [The conversation a run belongs to](#the-conversation-a-run-belongs-to)
+    - [What a plan run knows](#what-a-plan-run-knows)
+    - [What the inventory is an inventory OF](#what-the-inventory-is-an-inventory-of)
+    - [The statement a plan run drafts](#the-statement-a-plan-run-drafts)
+  - [Durability and resume](#durability-and-resume)
+    - [A drive that dies before the loop](#a-drive-that-dies-before-the-loop)
+  - [The tool set](#the-tool-set)
+    - [The query-optimization template](#the-query-optimization-template)
+    - [The database-assessment template](#the-database-assessment-template)
+    - [The operations template](#the-operations-template)
+    - [The data-analysis template](#the-data-analysis-template)
+    - [Presenting an answer](#presenting-an-answer)
+    - [Handing the answer to the editor (auto-execute)](#handing-the-answer-to-the-editor-auto-execute)
+    - [What the fence is proved to hold against](#what-the-fence-is-proved-to-hold-against)
+  - [What bounds a run](#what-bounds-a-run)
+  - [Supported models](#supported-models)
+  - [The model side](#the-model-side)
+    - [What a refused model looks like in the app](#what-a-refused-model-looks-like-in-the-app)
+  - [Whether the run answered](#whether-the-run-answered)
+    - [The eval harness](#the-eval-harness)
+  - [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
+  - [HTTP surface](#http-surface)
+  - [The surface in the app](#the-surface-in-the-app)
+  - [Deployment](#deployment)
+  - [Package boundary](#package-boundary)
+  - [Module map](#module-map)
+  - [Known limitations](#known-limitations)
+  - [Related documentation](#related-documentation)
 
 ## Turning it on
 
@@ -2613,7 +2615,6 @@ the role's own grants are the whole boundary (A3).
 - **B6** — the repair ledger is rebuilt per drive, so a resumed run's repair attempts start over.
 - **B9** — the resume sweep is local-only, so an interrupted run is picked up only on the `local`
   backend, and only once its claim has gone stale.
-- **B11** — the rail can stop a run but cannot pause or resume one.
 - **B16** — the opt-in `@workflow/world-postgres` backend is not present in the standalone payload,
   so it cannot load in the container image or the npx payload.
 - **B29** — an identifier the model quotes back into its own tool arguments reaches the transcript
