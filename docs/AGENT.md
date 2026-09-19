@@ -2595,6 +2595,10 @@ the role's own grants are the whole boundary (A3).
   chat surface an Anthropic provider first.
 - **B4** — a mapped database error discards the text distinguishing a timeout cancel from an operator
   cancel.
+- **B5** — the ledger assumes one writer per run and cannot enforce it.
+- **B6** — every cost ceiling is per-drive, so N resumes can cost up to N times one drive's budget.
+- **B9** — nothing enqueues a drive, so an interrupted run is resumable but never resumed.
+- **B11** — the rail can stop a run but cannot pause or resume one.
 - **B16** — the opt-in `@workflow/world-postgres` backend is not present in the standalone payload,
   so it cannot load in the container image or the npx payload.
 - **B29** — an identifier the model quotes back into its own tool arguments reaches the transcript

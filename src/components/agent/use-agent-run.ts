@@ -153,9 +153,9 @@ export interface AgentRunFollower {
    *          caller leave two runs executing against the same connection (#407 review).
    */
   readonly cancel: () => Promise<boolean>;
-  /** Asks the run to pause; the server accepts only a RUNNING run (`docs/BACKLOG.md` B11). */
+  /** Asks the run to pause; the server accepts only a RUNNING run. */
   readonly pause: () => Promise<boolean>;
-  /** Asks the run to resume; the server accepts only a PAUSED run (`docs/BACKLOG.md` B11). */
+  /** Asks the run to resume; the server accepts only a PAUSED run. */
   readonly resume: () => Promise<boolean>;
 }
 

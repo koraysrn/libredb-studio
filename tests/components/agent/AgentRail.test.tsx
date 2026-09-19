@@ -2263,7 +2263,7 @@ describe("AgentRail", () => {
     });
 
     /**
-     * Pause and resume are offered only where the service can honour them (B11):
+     * Pause and resume are offered only where the service can honour them:
      * pause on a live running run, resume on a paused one. A control the service
      * cannot honour is not rendered — not even disabled, which would read as a
      * capability that is merely unavailable right now.
