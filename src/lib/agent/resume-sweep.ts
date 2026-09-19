@@ -149,15 +149,30 @@ export async function sweepOnce(options: {
 }
 
 /**
- * One full sweep against the real service and drive.
- * `startAgentResumeSweep` is the timer around it.
+ * The pieces `runResumeSweepOnce` needs from the real runtime, kept as one seam
+ * so a test can drive the glue without a model, a connection or a world.
  */
-async function runResumeSweepOnce(): Promise<ResumeSweepOutcome> {
-  if (!isAgentRuntimeEnabled()) return { claimed: 0, skipped: 0 };
+export interface ResumeSweepRuntime {
+  readonly driveAgentRun: (runId: string) => Promise<unknown>;
+  readonly getAgentRunService: () => Promise<AgentRunService>;
+}
+
+/**
+ * One full sweep against the real service and drive. Every dependency is
+ * injectable: `runtime` supplies the drive and the service, `enabled` is the
+ * availability gate, and `sweep` is the pass itself. `startAgentResumeSweep` is
+ * the timer around the real version.
+ */
+export async function runResumeSweepOnce(
+  runtime: () => Promise<ResumeSweepRuntime> = () => import("./runtime"),
+  enabled: () => boolean = isAgentRuntimeEnabled,
+  sweep: typeof sweepOnce = sweepOnce,
+): Promise<ResumeSweepOutcome> {
+  if (!enabled()) return { claimed: 0, skipped: 0 };
   try {
-    const { driveAgentRun, getAgentRunService } = await import("./runtime");
+    const { driveAgentRun, getAgentRunService } = await runtime();
     const service = await getAgentRunService();
-    const outcome = await sweepOnce({ service, drive: driveAgentRun });
+    const outcome = await sweep({ service, drive: driveAgentRun });
     if (outcome.claimed > 0 || outcome.skipped > 0) {
       logger.info("agent resume sweep finished", { route: "agent-resume-sweep", ...outcome });
     }
