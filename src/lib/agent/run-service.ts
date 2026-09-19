@@ -514,7 +514,7 @@ export class AgentRunService {
    * Pauses a RUNNING run: its ledger records `run-paused`, and the run holds no
    * further steps until it is resumed. A paused run is not terminal — it keeps
    * its artifacts, and a resume continues the same run with its remaining
-   * ceilings (`docs/BACKLOG.md` B11).
+   * ceilings.
    */
   async pauseRun(runId: string): Promise<AgentRunRecord> {
     const view = await this.readOrThrow(runId);

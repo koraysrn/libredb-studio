@@ -41,7 +41,7 @@ export async function DELETE(req: Request, { params }: RunParams) {
 }
 
 /**
- * Pauses or resumes the run (`docs/BACKLOG.md` B11). Pause lands only on a
+ * Pauses or resumes the run. Pause lands only on a
  * RUNNING run; resume only on a PAUSED one — the service refuses anything else,
  * so the rail renders whichever control the ledger says the service can honour.
  */

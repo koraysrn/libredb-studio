@@ -1620,7 +1620,7 @@ export function AgentRail({
   const canStop =
     run.runId !== null && LIVE_STATUSES.has(run.timeline.status) && !run.timeline.stopRequested && !run.isStopping;
   // Pause and resume are offered only where the service can honour them: pause on
-  // a live, running run; resume on a paused one (`docs/BACKLOG.md` B11).
+  // a live, running run; resume on a paused one.
   const canPause =
     run.runId !== null && run.timeline.status === "running" && !run.timeline.stopRequested && !run.isStopping;
   const canResume = run.runId !== null && run.timeline.status === "paused";

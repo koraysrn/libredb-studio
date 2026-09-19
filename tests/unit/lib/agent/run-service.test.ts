@@ -1105,7 +1105,7 @@ describe("AgentRunService — run history", () => {
   });
 });
 
-// ─── pause and resume (B11) ────────────────────────────────────────────────
+// ─── pause and resume ─────────────────────────────────────────────────────
 
 describe("AgentRunService — pause and resume", () => {
   test("pauses a running run and records the pause in the ledger", async () => {
