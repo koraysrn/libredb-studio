@@ -1,13 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createLocalWorld } from "@workflow/world-local";
+import { logger } from "@/lib/logger";
+import { agentResumeSweepIntervalMs, agentStaleRunAfterMs } from "@/lib/agent/config";
 import { AgentRunService } from "@/lib/agent/run-service";
 import { AgentRunStore } from "@/lib/agent/run-store";
 import {
   isStaleRun,
   listLocalAgentRunIds,
+  runResumeSweepOnce,
   startAgentResumeSweep,
   sweepOnce,
   sweepStaleRuns,
@@ -215,5 +218,99 @@ describe("startAgentResumeSweep", () => {
     } finally {
       if (saved !== undefined) process.env.LIBREDB_AGENT_RESUME_SWEEP_INTERVAL_MS = saved;
     }
+  });
+});
+
+describe("runResumeSweepOnce", () => {
+  test("does nothing while the runtime is disabled", async () => {
+    const outcome = await runResumeSweepOnce(
+      async () => {
+        throw new Error("the runtime must not be touched");
+      },
+      () => false,
+      async () => {
+        throw new Error("the sweep must not run");
+      },
+    );
+
+    expect(outcome).toEqual({ claimed: 0, skipped: 0 });
+  });
+
+  test("drives a sweep and logs when something was claimed or skipped", async () => {
+    const h = harness();
+    const info = spyOn(logger, "info");
+    try {
+      const outcome = await runResumeSweepOnce(
+        async () => ({ driveAgentRun: async () => {}, getAgentRunService: async () => h.service }),
+        () => true,
+        async () => ({ claimed: 1, skipped: 1 }),
+      );
+
+      expect(outcome).toEqual({ claimed: 1, skipped: 1 });
+      expect(info).toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("stays quiet for a sweep that found nothing to do", async () => {
+    const h = harness();
+    const info = spyOn(logger, "info");
+    try {
+      const outcome = await runResumeSweepOnce(
+        async () => ({ driveAgentRun: async () => {}, getAgentRunService: async () => h.service }),
+        () => true,
+        async () => ({ claimed: 0, skipped: 0 }),
+      );
+
+      expect(outcome).toEqual({ claimed: 0, skipped: 0 });
+      expect(info).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("reports a failure and keeps the sweep claimable instead of throwing", async () => {
+    const error = spyOn(logger, "error");
+    try {
+      const outcome = await runResumeSweepOnce(
+        async () => {
+          throw new Error("world unavailable");
+        },
+        () => true,
+        async () => ({ claimed: 0, skipped: 0 }),
+      );
+
+      expect(outcome).toEqual({ claimed: 0, skipped: 0 });
+      expect(error).toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
+describe("the sweep env knobs", () => {
+  afterEach(() => {
+    delete process.env.LIBREDB_AGENT_RESUME_SWEEP_INTERVAL_MS;
+    delete process.env.LIBREDB_AGENT_STALE_RUN_AFTER_MS;
+  });
+
+  test("the interval falls back to the default for a non-positive-whole value and honours a valid one", () => {
+    process.env.LIBREDB_AGENT_RESUME_SWEEP_INTERVAL_MS = "not-a-number";
+    expect(agentResumeSweepIntervalMs()).toBe(60_000);
+    process.env.LIBREDB_AGENT_RESUME_SWEEP_INTERVAL_MS = "0";
+    expect(agentResumeSweepIntervalMs()).toBe(60_000);
+    process.env.LIBREDB_AGENT_RESUME_SWEEP_INTERVAL_MS = "4321";
+    expect(agentResumeSweepIntervalMs()).toBe(4321);
+  });
+
+  test("the stale threshold falls back to its default and honours a valid one", () => {
+    delete process.env.LIBREDB_AGENT_STALE_RUN_AFTER_MS;
+    const defaultMs = agentStaleRunAfterMs();
+
+    process.env.LIBREDB_AGENT_STALE_RUN_AFTER_MS = "garbage";
+    expect(agentStaleRunAfterMs()).toBe(defaultMs);
+    process.env.LIBREDB_AGENT_STALE_RUN_AFTER_MS = "4321";
+    expect(agentStaleRunAfterMs()).toBe(4321);
   });
 });
