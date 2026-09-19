@@ -77,7 +77,15 @@ export const STATUSES = new Set(["Implemented", "Partial", "Not implemented"]);
  * rule is the repository's definition of "this test runs", so the gate asks it.
  */
 function discoveredTestFiles(root) {
-  const listed = spawnSync("bun", [TEST_RUNNER, "--list"], { cwd: root, encoding: "utf8" });
+  // Windows exposes bun as `bun.cmd`; a shell-less spawn of a `.cmd` script is
+  // EINVAL and a bare name does not resolve PATHEXT. Arguments are fixed
+  // literals, so the shell is safe here.
+  const onWindows = process.platform === "win32";
+  const listed = spawnSync(onWindows ? "bun.cmd" : "bun", [TEST_RUNNER, "--list"], {
+    cwd: root,
+    encoding: "utf8",
+    shell: onWindows,
+  });
   if (listed.status !== 0) {
     console.error(`ERROR: could not ask ${TEST_RUNNER} what it runs: ${listed.stderr || listed.error}`);
     process.exit(1);
