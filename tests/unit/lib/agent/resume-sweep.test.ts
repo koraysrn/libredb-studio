@@ -80,13 +80,61 @@ describe("isStaleRun", () => {
 });
 
 describe("listLocalAgentRunIds", () => {
+  /**
+   * Writes the registry the way `@workflow/world-local` writes it: one
+   * `streams/runs/<id>.json` per run, holding the stream names that run wrote.
+   * Built here rather than by hand-making `streams/<name>` directories, which
+   * the world never creates — a fixture in that shape passes while the real
+   * ledger returns nothing.
+   */
+  function writeRunRegistry(dir: string, id: string, streams: readonly string[]): void {
+    const runsDir = path.join(dir, "streams", "runs");
+    fs.mkdirSync(runsDir, { recursive: true });
+    fs.writeFileSync(path.join(runsDir, `${id}.json`), JSON.stringify({ streams }, null, 2));
+  }
+
   test("lists only agent-ledger streams, by run id", async () => {
     const dir = freshDataDir();
-    fs.mkdirSync(path.join(dir, "streams", "agent-ledger-arun_a"), { recursive: true });
-    fs.mkdirSync(path.join(dir, "streams", "agent-history-sess_1"), { recursive: true });
-    fs.mkdirSync(path.join(dir, "streams", "other"), { recursive: true });
+    writeRunRegistry(dir, "arun_a", ["agent-ledger-arun_a"]);
+    writeRunRegistry(dir, "sess_1", ["agent-history-sess_1"]);
+    writeRunRegistry(dir, "other", ["other"]);
 
     expect(await listLocalAgentRunIds(dir)).toEqual(["arun_a"]);
+  });
+
+  test("reads the run id out of a registry that names several streams", async () => {
+    const dir = freshDataDir();
+    writeRunRegistry(dir, "arun_b", ["agent-history-sess_2", "agent-ledger-arun_b"]);
+
+    expect(await listLocalAgentRunIds(dir)).toEqual(["arun_b"]);
+  });
+
+  test("a real local world's ledger is discoverable, not just a hand-built fixture", async () => {
+    const dir = freshDataDir();
+    const store = new AgentRunStore({ world: createLocalWorld({ dataDir: dir, recoverActiveRuns: false }) });
+    const service = new AgentRunService({
+      store,
+      resources: {
+        tracker: new ExecutionBudgetTracker(),
+        artifacts: new ExecutionArtifactStore<QueryResult>({ ttlMs: 60_000, maxArtifacts: 20 }),
+      },
+    });
+    const { runId } = await service.start(START_INPUT);
+
+    // The point of this case: the layout is the world's, never the test's.
+    expect(await listLocalAgentRunIds(dir)).toEqual([runId]);
+  });
+
+  test("skips a registry file that is unreadable or not the shape it should be", async () => {
+    const dir = freshDataDir();
+    const runsDir = path.join(dir, "streams", "runs");
+    fs.mkdirSync(runsDir, { recursive: true });
+    fs.writeFileSync(path.join(runsDir, "broken.json"), "{ not json");
+    fs.writeFileSync(path.join(runsDir, "wrong-shape.json"), JSON.stringify({ streams: "nope" }));
+    fs.writeFileSync(path.join(runsDir, "not-a-registry.txt"), "ignored");
+    writeRunRegistry(dir, "arun_c", ["agent-ledger-arun_c"]);
+
+    expect(await listLocalAgentRunIds(dir)).toEqual(["arun_c"]);
   });
 
   test("returns an empty list when the streams directory is absent", async () => {

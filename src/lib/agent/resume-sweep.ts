@@ -24,7 +24,7 @@
  * so a still-live drive always refuses the sweep's drive at claim time first.
  */
 
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "@/lib/logger";
 import {
@@ -60,27 +60,45 @@ export function isStaleRun(report: AgentRunStatusReport, nowMs: number, staleAft
 }
 
 /**
- * Lists the run ids this server's local ledger holds, by stream name. Returns
- * `[]` when the streams directory does not exist yet or cannot be read — a
- * first boot has nothing to sweep, and a permission fault is the ledger's
- * problem to report, not the sweep's.
+ * Lists the run ids this server's local ledger holds.
+ *
+ * Read from the world's OWN registry, `streams/runs/<id>.json`, each of which
+ * holds `{ "streams": [...] }` — the stream names that run wrote. The agent
+ * ledger is the entry carrying `AGENT_LEDGER_STREAM_PREFIX`, and the run id is
+ * what follows it. Not from `readdir(streams/)`: that directory holds exactly
+ * two entries, `runs` and `chunks`, and never one named per stream, so matching
+ * the prefix against it finds nothing whatever the ledger actually holds.
+ *
+ * Returns `[]` when the registry does not exist yet or cannot be read — a first
+ * boot has nothing to sweep, and a permission fault is the ledger's problem to
+ * report, not the sweep's. A single unreadable or malformed registry file is
+ * skipped for the same reason, rather than failing the whole pass.
  */
 export async function listLocalAgentRunIds(directory = resolveAgentLedgerDirectory()): Promise<string[]> {
-  const streamsDir = path.join(directory, "streams");
+  const runsDir = path.join(directory, "streams", "runs");
   let names: string[];
   try {
-    names = await readdir(streamsDir);
+    names = await readdir(runsDir);
   } catch {
     return [];
   }
-  const ids: string[] = [];
+  const ids = new Set<string>();
   for (const name of names) {
-    if (name.startsWith(AGENT_LEDGER_STREAM_PREFIX)) {
-      const runId = name.slice(AGENT_LEDGER_STREAM_PREFIX.length);
-      if (runId.length > 0) ids.push(runId);
+    if (!name.endsWith(".json")) continue;
+    let streams: unknown;
+    try {
+      streams = JSON.parse(await readFile(path.join(runsDir, name), "utf8"))?.streams;
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(streams)) continue;
+    for (const stream of streams) {
+      if (typeof stream !== "string" || !stream.startsWith(AGENT_LEDGER_STREAM_PREFIX)) continue;
+      const runId = stream.slice(AGENT_LEDGER_STREAM_PREFIX.length);
+      if (runId.length > 0) ids.add(runId);
     }
   }
-  return ids;
+  return [...ids];
 }
 
 /**
