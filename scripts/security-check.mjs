@@ -79,14 +79,14 @@ export const STATUSES = new Set(["Implemented", "Partial", "Not implemented"]);
 function discoveredTestFiles(root) {
   // Windows installs bun either as `bun.exe` (the setup action) or as a `bun.cmd`
   // npm shim; a bare name only resolves through the shell's PATHEXT lookup, so the
-  // shell is enabled on win32 and the name stays `bun`. Arguments are fixed string
-  // literals, so the shell expands nothing attacker-controlled.
+  // shell is enabled on win32 and the name stays `bun`. The command and its
+  // arguments are fixed string literals, so the shell expands nothing
+  // attacker-controlled. A single command string avoids Node's DEP0190 warning,
+  // which fires when `shell: true` is combined with an args array.
   const onWindows = process.platform === "win32";
-  const listed = spawnSync("bun", [TEST_RUNNER, "--list"], {
-    cwd: root,
-    encoding: "utf8",
-    shell: onWindows,
-  });
+  const listed = onWindows
+    ? spawnSync(`bun ${TEST_RUNNER} --list`, { cwd: root, encoding: "utf8", shell: true })
+    : spawnSync("bun", [TEST_RUNNER, "--list"], { cwd: root, encoding: "utf8" });
   if (listed.status !== 0) {
     console.error(`ERROR: could not ask ${TEST_RUNNER} what it runs: ${listed.stderr || listed.error}`);
     process.exit(1);
