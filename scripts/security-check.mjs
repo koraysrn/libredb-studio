@@ -78,11 +78,15 @@ export const STATUSES = new Set(["Implemented", "Partial", "Not implemented"]);
  */
 function discoveredTestFiles(root) {
   // Windows installs bun either as `bun.exe` (the setup action) or as a `bun.cmd`
-  // npm shim; a bare name only resolves through the shell's PATHEXT lookup, so the
-  // shell is enabled on win32 and the name stays `bun`. The command and its
-  // arguments are fixed string literals, so the shell expands nothing
-  // attacker-controlled. A single command string avoids Node's DEP0190 warning,
-  // which fires when `shell: true` is combined with an args array.
+  // npm shim. A shell-less spawn resolves the first and not the second: libuv's
+  // path search appends only `.com` and `.exe` to an extension-less name, never
+  // `.cmd`. That is why CI's windows-latest leg is green without this branch, and
+  // why a developer whose bun came from npm sees the gate fail before it runs a
+  // single control. The shell is enabled on win32 so PATHEXT resolves either one,
+  // and the name stays `bun`. The command and its arguments are fixed string
+  // literals, so the shell expands nothing attacker-controlled. A single command
+  // string avoids Node's DEP0190 warning, which fires when `shell: true` is
+  // combined with an args array.
   const onWindows = process.platform === "win32";
   const listed = onWindows
     ? spawnSync(`bun ${TEST_RUNNER} --list`, { cwd: root, encoding: "utf8", shell: true })
