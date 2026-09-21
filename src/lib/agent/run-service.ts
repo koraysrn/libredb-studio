@@ -423,13 +423,14 @@ export class AgentRunService {
    * to write the entries the durability argument rests on, so the type refuses at
    * compile time rather than a check refusing at run time.
    *
-   * A narrative entry may only be added to a RUNNING run, for the same reason a
-   * step may: a terminal run's ledger is closed, and an append after `close`
-   * resolves while `read` never returns it (`run-store.ts`).
+   * A narrative entry may be added to a RUNNING run or a PAUSED one: a pause means
+   * "take no new step", not "lose the sentence the model already wrote". A queued
+   * run has nothing in flight to narrate, and a terminal run's ledger is closed —
+   * an append after `close` resolves while `read` never returns it (`run-store.ts`).
    */
   async recordEvent(runId: string, narrative: AgentRunNarrative): Promise<void> {
     const view = await this.readOrThrow(runId);
-    if (view.record.status !== "running") {
+    if (view.record.status !== "running" && view.record.status !== "paused") {
       throw new AgentRunServiceError("RUN_NOT_RUNNING", `agent run "${runId}" is ${view.record.status}, not running`);
     }
     await this.store.appendEvent(runId, { ...narrative, atMs: this.clock() } as AgentRunNarrativeEvent);
@@ -503,14 +504,15 @@ export class AgentRunService {
     if (view.terminal) {
       throw new AgentRunServiceError("RUN_ALREADY_TERMINAL", `agent run "${runId}" already ${view.record.status}`);
     }
+    // A paused run is not advanced to terminal from here: it has not failed, and
+    // finishing it would record an outcome its drive never reached. Resume it, or
+    // cancel it; the drive's own pause checkpoints are what stop it cleanly.
+    if (view.record.status === "paused") {
+      throw new AgentRunServiceError("RUN_NOT_RUNNING", `agent run "${runId}" is paused, not running`);
+    }
     return (await this.finalize(runId, status, ending)).record;
   }
 
-  /**
-   * What a process taking over a run needs to know: what the ledger already
-   * settled, and which steps are beyond re-deriving. A resumed run re-derives
-   * from this; it does not repeat work.
-   */
   /**
    * Pauses a RUNNING run: its ledger records `run-paused`, and the run holds no
    * further steps until it is resumed. A paused run is not terminal — it keeps
@@ -540,6 +542,11 @@ export class AgentRunService {
     return (await this.readOrThrow(runId)).record;
   }
 
+  /**
+   * What a process taking over a run needs to know: what the ledger already
+   * settled, and which steps are beyond re-deriving. A resumed run re-derives
+   * from this; it does not repeat work.
+   */
   async resume(runId: string): Promise<AgentRunResumeReport> {
     const view = await this.readOrThrow(runId);
     if (view.terminal) {

@@ -3377,6 +3377,13 @@ export async function runInvestigation(
       status: AgentRunTerminalStatus,
       stopReason: AgentRunStopReason,
     ): Promise<AgentInvestigationResult> => {
+      // A pause that landed while the model was composing its closing work wins: the
+      // drive stops and leaves the run paused, and whatever the model already wrote
+      // stays on the ledger instead of being finished over.
+      const live = await service.status(runId);
+      if (live?.record.status === "paused") {
+        return { runId, status: "paused", stopReason: null, turns, text };
+      }
       if (text.length > 0) {
         await service.recordEvent(runId, { kind: "closing-statement", text });
         // After the prose, in the order a reader folds them: the statement is a fact
