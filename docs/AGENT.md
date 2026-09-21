@@ -2343,8 +2343,8 @@ figure it qualifies and still in the accessibility tree whether or not that popo
 Two further rules govern it:
 
 - **A control the service cannot honour is not rendered at all.** There is no disabled-looking button
-  standing in for a capability, which is why the rail stops a run but does not offer pause/resume
-  (B11).
+  standing in for a capability: pause is offered on a running run and resume on a paused one, and
+  neither is rendered where the service would refuse it.
 - **The meter reports only what is actually enforced** — statements, database time, the run deadline,
   repair attempts — and states the SQLite non-preemption caveat rather than implying that an
   overrunning statement is cut short. It reports no token budget because none is enforced. A statement that
