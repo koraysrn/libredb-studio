@@ -1159,7 +1159,7 @@ describe("AgentRunService — pause and resume", () => {
     expect((await captureServiceError(() => h.service.resumeRun(runId))).reasonCode).toBe("RUN_NOT_PAUSED");
   });
 
-  test("a paused run is not terminal, and a step refuses while it is paused", async () => {
+  test("a paused run is not terminal, and the next step reads the pause checkpoint", async () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
@@ -1168,12 +1168,43 @@ describe("AgentRunService — pause and resume", () => {
     const report = await h.service.status(runId);
     expect(report?.record.status).toBe("paused");
 
-    const error = await captureServiceError(async () =>
-      h.service.runStep(runId, { stepId: "s2", tool: "run_read_query" }, async () => ({
-        kind: "completed",
-        artifact: artifactReference(runId, "corr_2"),
-      })),
-    );
-    expect(error.reasonCode).toBe("RUN_NOT_RUNNING");
+    let executed = false;
+    const result = await h.service.runStep(runId, { stepId: "s2", tool: "run_read_query" }, async () => {
+      executed = true;
+      return COMPLETED(runId);
+    });
+
+    expect(result.kind).toBe("paused");
+    expect(executed).toBe(false);
+    const after = await h.service.status(runId);
+    expect(after?.record.status).toBe("paused");
+    expect(after?.record.events.some((entry) => entry.kind === "run-finished")).toBe(false);
+  });
+
+  test("a pause that lands mid-step keeps the run paused for the step after it", async () => {
+    // The pause arrives while a tool is executing: the step in flight completes (its
+    // effect was already allowed), and the NEXT step reads the checkpoint and stops,
+    // instead of throwing RUN_NOT_RUNNING and letting the drive end the run as failed.
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+
+    const first = await h.service.runStep(runId, { stepId: "s1", tool: "run_read_query" }, async () => {
+      await h.service.pauseRun(runId);
+      return COMPLETED(runId);
+    });
+    expect(first.kind).toBe("performed");
+
+    let executed = false;
+    const second = await h.service.runStep(runId, { stepId: "s2", tool: "run_read_query" }, async () => {
+      executed = true;
+      return COMPLETED(runId);
+    });
+
+    expect(second.kind).toBe("paused");
+    expect(executed).toBe(false);
+    const report = await h.service.status(runId);
+    expect(report?.record.status).toBe("paused");
+    expect(report?.record.events.some((entry) => entry.kind === "run-finished")).toBe(false);
   });
 });

@@ -3022,6 +3022,128 @@ describe("cancellation is honoured at the next checkpoint", () => {
   });
 });
 
+describe("pause is honoured at the next checkpoint", () => {
+  test("a pause asked for while the model was thinking leaves the run paused before the statement", async () => {
+    const b = boot(freshDataDir());
+    const run = await startRun(b);
+    const script = scriptedModel(async () => {
+      // Recorded while the model "answers": the loop's next checkpoint is the step.
+      await b.service.pauseRun(run.runId);
+      return chatToolCallStream("run_read_query", JSON.stringify({ sql: "SELECT id FROM orders" }));
+    });
+
+    const result = await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    expect(result.status).toBe("paused");
+    expect(result.stopReason).toBeNull();
+    // The context capture ran (the pause was recorded after it, while the model was
+    // answering); the model's own statement never reached the database.
+    expect(modelStatements(b.queryReadOnly)).toEqual([]);
+    const kinds = kindsOf(await eventsOf(b.store, run.runId));
+    expect(kinds).toContain("run-paused");
+    expect(kinds).not.toContain("run-finished");
+  });
+
+  test("a pause while the model was thinking reaches a draftless tool at runStep's checkpoint", async () => {
+    const b = boot(freshDataDir());
+    const run = await startRun(b);
+    const script = scriptedModel(async () => {
+      await b.service.pauseRun(run.runId);
+      return chatToolCallStream("inspect_schema", JSON.stringify({ table: "orders" }));
+    });
+
+    const result = await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    expect(result.status).toBe("paused");
+    expect(result.stopReason).toBeNull();
+    expect(modelStatements(b.queryReadOnly)).toEqual([]);
+    expect(kindsOf(await eventsOf(b.store, run.runId))).not.toContain("run-finished");
+  });
+
+  test("a pause that lands mid-step stops the drive at the loop's next checkpoint", async () => {
+    let runId = "";
+    let service: AgentRunService | null = null;
+    const b = boot(freshDataDir(), {
+      answer: async (sql) => {
+        if (runId !== "" && String(sql).includes("SELECT id FROM orders")) {
+          await service?.pauseRun(runId);
+        }
+        return queryResult();
+      },
+    });
+    service = b.service;
+    const run = await startRun(b);
+    runId = run.runId;
+    const script = scriptedModel(callsTool("run_read_query", { sql: "SELECT id FROM orders" }), reportOn());
+
+    const result = await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    expect(result.status).toBe("paused");
+    expect(result.stopReason).toBeNull();
+    expect(kindsOf(await eventsOf(b.store, run.runId))).not.toContain("run-finished");
+  });
+
+  test("a pause asked for while the model was thinking leaves a profile_table call paused too", async () => {
+    const b = boot(freshDataDir(), {
+      describesSchema: async () => [
+        {
+          name: "orders",
+          columns: [{ name: "customerId", type: "string", nullable: true, isPrimary: false }],
+          indexes: [],
+          foreignKeys: [],
+        },
+      ],
+    });
+    const run = await startRun(b, "agent", "database-assessment");
+    const script = scriptedModel(async () => {
+      await b.service.pauseRun(run.runId);
+      return chatToolCallStream("profile_table", JSON.stringify({ table: "orders" }));
+    });
+
+    const result = await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    expect(result.status).toBe("paused");
+    expect(result.stopReason).toBeNull();
+    expect(kindsOf(await eventsOf(b.store, run.runId))).not.toContain("run-finished");
+  });
+
+  test("a run already paused before its drive is left paused, not failed", async () => {
+    const b = boot(freshDataDir());
+    const run = await startRun(b);
+    await b.service.markRunning(run.runId);
+    await b.service.pauseRun(run.runId);
+    const script = scriptedModel(answersProse("never asked"));
+
+    const result = await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    expect(result.status).toBe("paused");
+    expect(result.stopReason).toBeNull();
+    // The model is never asked: a paused run gets no turn.
+    expect(script.turns).toHaveLength(0);
+    expect(kindsOf(await eventsOf(b.store, run.runId))).not.toContain("run-finished");
+  });
+});
+
 // ─── bounds ─────────────────────────────────────────────────────────────────
 
 describe("the run loop is bounded", () => {
