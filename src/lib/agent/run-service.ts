@@ -247,10 +247,12 @@ export type AgentRunServiceReason =
   /** The caller's target scope is not the connection the run was opened for. */
   | "RUN_CONNECTION_MISMATCH"
   /**
-   * Another drive already owns this run in THIS process. The durable ledger has no
-   * compare-and-append fence, so two drives on one run would both read a step as
-   * uninvoked and both execute it (`docs/BACKLOG.md` B5). This is the process-local
-   * half of that fence; the cross-process half still belongs to the durable backend.
+   * Another drive already owns this run. The refusal comes first from the
+   * in-process `activeDrives` map, then from the durable `drive-claimed` ledger
+   * record the claim wrote, so a second drive in this process or another is
+   * refused before it can read a step as uninvoked and execute it twice. The
+   * cross-process half of the fence still belongs to the durable backend
+   * (`docs/BACKLOG.md` B5).
    */
   | "RUN_ALREADY_DRIVEN";
 

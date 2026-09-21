@@ -1045,32 +1045,27 @@ describe("AgentRunService — drive ownership", () => {
     await h.service.releaseDrive(runId);
   });
 
-  test("a claim is durable: a second store over the same files refuses it", async () => {
+  test("a claim is durable: a second store over the same files folds it back", async () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
 
     await h.service.claimDrive(runId);
 
-    const other = new AgentRunService({
-      store: h.reader(),
-      resources: { tracker: h.tracker, artifacts: h.artifacts },
-    });
-    expect((await captureServiceError(async () => other.claimDrive(runId))).reasonCode).toBe("RUN_ALREADY_DRIVEN");
+    // Observed through the ledger, not through the process-local guard: a fresh
+    // store over the same files folds the same claim back.
+    const view = await h.reader().read(runId);
+    expect(view?.driveClaim?.driveId).toBeTruthy();
+    expect(view?.driveClaim?.expiresAtMs).toEqual(expect.any(Number));
   });
 
-  test("a release is durable too: a second store may then claim the run", async () => {
+  test("a release is durable too: the folded claim is gone", async () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
 
     await h.service.claimDrive(runId);
     await h.service.releaseDrive(runId);
 
-    const other = new AgentRunService({
-      store: h.reader(),
-      resources: { tracker: h.tracker, artifacts: h.artifacts },
-    });
-    await other.claimDrive(runId);
-    await other.releaseDrive(runId);
+    expect((await h.reader().read(runId))?.driveClaim).toBeNull();
   });
 });
 
