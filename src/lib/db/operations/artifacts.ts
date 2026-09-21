@@ -113,9 +113,9 @@ export class ExecutionArtifactStore<T = unknown> {
   /**
    * Sets how many artifacts ONE run may hold at once, across drives. Derived
    * from the run's own workflow ceiling rather than from a per-drive constant,
-   * so a resumed run never evicts the evidence an earlier drive cited
-   * (`docs/BACKLOG.md` B35). A run without an allowance is bounded only by the
-   * global cap, which is the pre-existing behaviour.
+   * so a resumed run never evicts the evidence an earlier drive cited (#999). A
+   * run without an allowance is bounded only by the global cap, which is the
+   * pre-existing behaviour.
    */
   setRunAllowance(runId: string, allowance: number): void {
     const id = assertIdentifier(runId, "runId");

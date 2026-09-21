@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { ExecutionArtifactStore } from "@/lib/db/operations/artifacts";
-import { ExecutionBudgetTracker } from "@/lib/db/operations/budgets";
+import { ArtifactStoreError, ExecutionArtifactStore } from "@/lib/db/operations/artifacts";
+import { BudgetAccountingError, ExecutionBudgetTracker } from "@/lib/db/operations/budgets";
 import { deriveDriveCeilings } from "@/lib/agent/drive-budget";
 import { AGENT_WORKFLOW_BUDGETS } from "@/lib/agent/execution-policy";
 import type { AgentRunEvent } from "@/lib/agent/types";
@@ -61,6 +61,14 @@ describe("deriveDriveCeilings", () => {
     const events: AgentRunEvent[] = [
       completedEvent("s1", 10),
       { kind: "statement-drafted", atMs: CREATED_AT + 1, stepId: "s0", sql: "SELECT 1", rationale: "inspect" },
+      // A refused read was charged database time too, but the fold counts only
+      // `tool-completed`: widening the guard to this kind would change the number.
+      {
+        kind: "tool-refused",
+        atMs: CREATED_AT + 2,
+        stepId: "s2",
+        refusal: { class: "policy-denied", reasonCode: "ROLE_FORBIDDEN" },
+      },
     ];
 
     const ceilings = deriveDriveCeilings(
@@ -95,9 +103,11 @@ describe("ExecutionBudgetTracker.seedUsage", () => {
   test("refuses a malformed seed", () => {
     const tracker = new ExecutionBudgetTracker();
 
-    expect(() => tracker.seedUsage("run_1", { executedStatements: -1, totalElapsedMs: 0 })).toThrow();
-    expect(() => tracker.seedUsage("run_1", { executedStatements: 0, totalElapsedMs: Number.NaN })).toThrow();
-    expect(() => tracker.seedUsage("run_1", { executedStatements: 1.5, totalElapsedMs: 0 })).toThrow();
+    expect(() => tracker.seedUsage("run_1", { executedStatements: -1, totalElapsedMs: 0 })).toThrow(BudgetAccountingError);
+    expect(() => tracker.seedUsage("run_1", { executedStatements: 0, totalElapsedMs: Number.NaN })).toThrow(
+      BudgetAccountingError,
+    );
+    expect(() => tracker.seedUsage("run_1", { executedStatements: 1.5, totalElapsedMs: 0 })).toThrow(BudgetAccountingError);
   });
 });
 
@@ -148,6 +158,6 @@ describe("ExecutionArtifactStore.setRunAllowance", () => {
 
   test("refuses a non-positive allowance", () => {
     const store = new ExecutionArtifactStore({ ttlMs: 60_000, maxArtifacts: 10 });
-    expect(() => store.setRunAllowance("run_a", 0)).toThrow();
+    expect(() => store.setRunAllowance("run_a", 0)).toThrow(ArtifactStoreError);
   });
 });
