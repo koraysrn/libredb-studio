@@ -1119,17 +1119,39 @@ describe("AgentRunService — pause and resume", () => {
     expect(record.events.map((entry) => entry.kind)).toEqual(["run-started", "run-paused"]);
   });
 
-  test("a paused run refuses further narrative events", async () => {
+  test("a paused run still records narrative the model already composed", async () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
     await h.service.pauseRun(runId);
 
-    const error = await captureServiceError(() =>
-      h.service.recordEvent(runId, { kind: "statement-drafted", stepId: "s1", sql: "SELECT 1", rationale: "inspect" }),
-    );
+    await h.service.recordEvent(runId, {
+      kind: "statement-drafted",
+      stepId: "s1",
+      sql: "SELECT 1",
+      rationale: "inspect",
+    });
+
+    const report = await h.service.status(runId);
+    expect(report?.record.status).toBe("paused");
+    expect(report?.record.events.map((entry) => entry.kind)).toEqual([
+      "run-started",
+      "run-paused",
+      "statement-drafted",
+    ]);
+  });
+
+  test("finishing a paused run refuses rather than advancing it", async () => {
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+    await h.service.pauseRun(runId);
+
+    const error = await captureServiceError(() => h.service.finish(runId, "failed"));
 
     expect(error.reasonCode).toBe("RUN_NOT_RUNNING");
+    const report = await h.service.status(runId);
+    expect(report?.record.status).toBe("paused");
   });
 
   test("resumes a paused run back to running", async () => {

@@ -3095,6 +3095,40 @@ describe("pause is honoured at the next checkpoint", () => {
     expect(kindsOf(await eventsOf(b.store, run.runId))).not.toContain("run-finished");
   });
 
+  test("a pause while the model composes its report keeps the run paused and the report", async () => {
+    const b = boot(freshDataDir());
+    const run = await startRun(b);
+    const script = scriptedModel(callsTool("run_read_query", { sql: "SELECT id FROM orders" }), async (turn) => {
+      // Recorded while the model "answers" its final turn: the report it already
+      // composed must still land, and the drive must not finish the run over it.
+      await b.service.pauseRun(run.runId);
+      return chatToolCallStream(
+        "compose_report",
+        JSON.stringify({
+          claims: [
+            {
+              claim: "The orders report scans the whole table.",
+              evidence: [{ source: "artifact", correlationId: correlationIdIn(turn.transcript) }],
+            },
+          ],
+        }),
+        "call_report",
+      );
+    });
+
+    const result = await runInvestigation(run.runId, {
+      service: b.service,
+      model: await modelOver(script.fetch),
+      resources: b.resources,
+    });
+
+    expect(result.status).toBe("paused");
+    expect(result.stopReason).toBeNull();
+    const kinds = kindsOf(await eventsOf(b.store, run.runId));
+    expect(kinds).toContain("report-composed");
+    expect(kinds).not.toContain("run-finished");
+  });
+
   test("a pause asked for while the model was thinking leaves a profile_table call paused too", async () => {
     const b = boot(freshDataDir(), {
       describesSchema: async () => [
