@@ -249,10 +249,15 @@ export type AgentRunServiceReason =
   /**
    * Another drive already owns this run. The refusal comes first from the
    * in-process `activeDrives` map, then from the durable `drive-claimed` ledger
-   * record the claim wrote, so a second drive in this process or another is
-   * refused before it can read a step as uninvoked and execute it twice. The
-   * cross-process half of the fence still belongs to the durable backend
-   * (`docs/BACKLOG.md` B5).
+   * record the claim wrote, so a second drive is refused before it can read a
+   * step as uninvoked and execute it twice.
+   *
+   * That fence is whole in ONE process only. `AgentRunStore.tryClaimDrive`
+   * serializes its read-then-append per store instance, which two OS processes
+   * over the same ledger do not share: both could read "no claim" and both
+   * append one. Making the durable half hold needs a conditional append on the
+   * stream's tail index, which the world does not offer (`docs/BACKLOG.md` B5,
+   * B16).
    */
   | "RUN_ALREADY_DRIVEN";
 
