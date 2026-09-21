@@ -235,7 +235,8 @@ export type AgentRunStepResult =
   | { readonly kind: "performed"; readonly settlement: AgentRunStepSettlement }
   | { readonly kind: "replayed"; readonly event: AgentSettledStepEvent }
   | { readonly kind: "indeterminate"; readonly stepId: string }
-  | { readonly kind: "cancelled" };
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "paused" };
 
 export type AgentRunServiceReason =
   | "RUN_NOT_FOUND"
@@ -590,6 +591,13 @@ export class AgentRunService {
     const view = await this.readOrThrow(runId);
     if (view.terminal) {
       throw new AgentRunServiceError("RUN_ALREADY_TERMINAL", `agent run "${runId}" already ${view.record.status}`);
+    }
+    // A pause is a stop the drive must honour, not an error to record: without this
+    // checkpoint the next step would throw RUN_NOT_RUNNING and the drive would end
+    // the run as failed. Like the cancellation checkpoint below, the run stays
+    // non-terminal and the drive stops of its own accord.
+    if (view.record.status === "paused") {
+      return { kind: "paused" };
     }
     // A step may only run on a run that is RUNNING. Without this, "a queued run
     // has nothing in flight" would be an assumption, and `cancel` ends a queued

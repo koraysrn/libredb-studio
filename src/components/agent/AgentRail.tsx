@@ -1603,19 +1603,12 @@ export function AgentRail({
   }, [run.runId, run.timeline.items, onShowArtifact]);
 
   /*
-    Stopping is the only control offered, and the two that are absent are absent
-    because the service cannot honour them rather than because they are unfinished:
-
-      - There is no PAUSE anywhere in `AgentRunService`. A run holds a database
-        connection and a budget while it is running, and "hold all of that
-        indefinitely" is not a capability this milestone built.
-      - RESUME exists (`POST /api/agent/drive`) but is authenticated by a
-        server-minted, single-purpose credential a browser never holds — it is the
-        seam for a machine producer (`docs/BACKLOG.md` B9), not a user control.
-
-    Neither is rendered even as a disabled button: a disabled control reads as a
-    capability that happens to be unavailable right now, which would be a claim
-    about this build that is not true.
+    Pause and resume are offered only where the service can honour them: pause on a
+    live, running run and resume on a paused one. Neither is rendered as a disabled
+    button — a disabled control reads as a capability that happens to be unavailable
+    right now, which would be a claim about this build that is not true — so the two
+    controls appear and disappear with the run's status rather than standing in for
+    a capability the service cannot honour.
   */
   const canStop =
     run.runId !== null && LIVE_STATUSES.has(run.timeline.status) && !run.timeline.stopRequested && !run.isStopping;
