@@ -103,11 +103,15 @@ describe("ExecutionBudgetTracker.seedUsage", () => {
   test("refuses a malformed seed", () => {
     const tracker = new ExecutionBudgetTracker();
 
-    expect(() => tracker.seedUsage("run_1", { executedStatements: -1, totalElapsedMs: 0 })).toThrow(BudgetAccountingError);
+    expect(() => tracker.seedUsage("run_1", { executedStatements: -1, totalElapsedMs: 0 })).toThrow(
+      BudgetAccountingError,
+    );
     expect(() => tracker.seedUsage("run_1", { executedStatements: 0, totalElapsedMs: Number.NaN })).toThrow(
       BudgetAccountingError,
     );
-    expect(() => tracker.seedUsage("run_1", { executedStatements: 1.5, totalElapsedMs: 0 })).toThrow(BudgetAccountingError);
+    expect(() => tracker.seedUsage("run_1", { executedStatements: 1.5, totalElapsedMs: 0 })).toThrow(
+      BudgetAccountingError,
+    );
   });
 });
 
