@@ -95,7 +95,7 @@ describe("listLocalAgentRunIds", () => {
 });
 
 describe("sweepStaleRuns", () => {
-  test("claims and drives a stale running run, then releases the claim", async () => {
+  test("drives a stale running run through the drive's own claim", async () => {
     const clock = fakeClock();
     const h = harness(clock.read);
     const { runId } = await h.service.start(START_INPUT);
@@ -105,8 +105,15 @@ describe("sweepStaleRuns", () => {
     const driven: string[] = [];
     const outcome = await sweepStaleRuns({
       service: h.service,
+      // The real drive claims before it steps (`runInvestigation`), so the mock
+      // does too: the sweep must NOT hold a claim of its own, or this refuses.
       drive: async (id) => {
-        driven.push(id);
+        await h.service.claimDrive(id);
+        try {
+          driven.push(id);
+        } finally {
+          await h.service.releaseDrive(id);
+        }
       },
       runIds: [runId],
       now: clock.read,
@@ -115,7 +122,7 @@ describe("sweepStaleRuns", () => {
 
     expect(outcome).toEqual({ claimed: 1, skipped: 0 });
     expect(driven).toEqual([runId]);
-    // The release is durable: a fresh claim succeeds after the sweep.
+    // The drive released durably: a fresh claim succeeds after the sweep.
     await h.service.claimDrive(runId);
     await h.service.releaseDrive(runId);
   });
@@ -126,11 +133,15 @@ describe("sweepStaleRuns", () => {
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
     clock.set(clock.read() + 60_001);
+    // A live drive already holds the claim.
     await h.service.claimDrive(runId);
 
     const outcome = await sweepStaleRuns({
       service: h.service,
-      drive: async () => {},
+      // The drive's own claim is refused because another drive holds it.
+      drive: async () => {
+        await h.service.claimDrive(runId);
+      },
       runIds: [runId],
       now: clock.read,
       staleAfterMs: 60_000,
@@ -138,6 +149,31 @@ describe("sweepStaleRuns", () => {
 
     expect(outcome).toEqual({ claimed: 0, skipped: 1 });
     await h.service.releaseDrive(runId);
+  });
+
+  test("a run whose drive throws does not prevent a later run from being swept", async () => {
+    const clock = fakeClock();
+    const h = harness(clock.read);
+    const { runId: first } = await h.service.start(START_INPUT);
+    await h.service.markRunning(first);
+    const { runId: second } = await h.service.start({ ...START_INPUT, objective: "another question" });
+    await h.service.markRunning(second);
+    clock.set(clock.read() + 60_001);
+
+    const driven: string[] = [];
+    const outcome = await sweepStaleRuns({
+      service: h.service,
+      drive: async (id) => {
+        if (id === first) throw new Error("boom");
+        driven.push(id);
+      },
+      runIds: [first, second],
+      now: clock.read,
+      staleAfterMs: 60_000,
+    });
+
+    expect(outcome).toEqual({ claimed: 1, skipped: 1 });
+    expect(driven).toEqual([second]);
   });
 
   test("ignores run ids it does not know", async () => {

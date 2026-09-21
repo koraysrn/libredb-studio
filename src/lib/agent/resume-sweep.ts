@@ -1,17 +1,16 @@
 /**
- * The producer `docs/BACKLOG.md` B9 records as missing: a sweep that finds runs
- * a dead process left `running` and drives each one again, in-process.
+ * The producer `docs/BACKLOG.md` B9 asked for: a sweep that finds runs a dead
+ * process left `running` and drives each one again, in-process.
  *
- * Nothing enqueues an agent drive today. A run is driven exactly once, by the
- * process that opened it; if that process dies mid-run the run stays `running`
- * in the ledger with nobody to pick it up. This module closes the loop for the
- * local, single-instance backend: at boot and then on a timer it lists the
- * ledger streams, finds the ones that are both stale and unclaimed, and drives
+ * A run is driven exactly once, by the process that opened it; if that process
+ * dies mid-run the run stays `running` with nobody to pick it up. This module
+ * closes the loop for the local, single-instance backend: at boot and then on a
+ * timer it lists the ledger streams, finds the ones that are stale, and drives
  * them through the same `driveAgentRun` the start route uses.
  *
- * Single-flight is the durable claim from `docs/BACKLOG.md` B5, not a sweep
- * bookkeeping flag: two sweepers racing on one run both ask the ledger for the
- * claim, and exactly one is given it.
+ * Single-flight is the drive's own durable claim (`docs/BACKLOG.md` B5), not a
+ * sweep bookkeeping flag: the sweep holds no claim, so `runInvestigation`'s
+ * `claimDrive` is what refuses a run another drive already owns.
  *
  * **Scope:** automatic resume is guaranteed for the `local` backend only. The
  * multi-replica Postgres world is absent from the shipped artifacts
@@ -22,7 +21,7 @@
  * **Resume latency:** a run orphaned by a crash is picked up only AFTER its
  * claim expires (run deadline plus grace) — this is EVENTUAL resume, not
  * immediate. The sweep's staleness threshold is wider than the claim expiry,
- * so a still-live drive always refuses the sweep at claim time first.
+ * so a still-live drive always refuses the sweep's drive at claim time first.
  */
 
 import { readdir } from "node:fs/promises";
@@ -85,10 +84,13 @@ export async function listLocalAgentRunIds(directory = resolveAgentLedgerDirecto
 }
 
 /**
- * One pass over the candidate run ids: stale running runs are claimed and
- * driven. A run that refuses the claim (a live drive holds it) is skipped, not
- * failed. Every claimed run is released in a `finally`, so a throw during the
- * drive never leaves the claim held past its expiry.
+ * One pass over the candidate run ids: stale running runs are driven, and the
+ * drive is the single-flight — `runInvestigation` claims the run before it
+ * steps, so a run another drive already owns refuses with `RUN_ALREADY_DRIVEN`
+ * and is skipped, not failed. The sweep holds no claim of its own: holding one
+ * here would make the drive refuse itself. Each drive is tried in its own
+ * `try/catch`, so one run's throw never prevents a later run id from being
+ * reached.
  */
 export async function sweepStaleRuns(options: {
   readonly service: AgentRunService;
@@ -107,16 +109,10 @@ export async function sweepStaleRuns(options: {
     if (report === null || !isStaleRun(report, now(), staleAfterMs)) continue;
 
     try {
-      await options.service.claimDrive(runId);
-    } catch {
-      skipped += 1;
-      continue;
-    }
-    try {
       await options.drive(runId);
       claimed += 1;
-    } finally {
-      await options.service.releaseDrive(runId);
+    } catch {
+      skipped += 1;
     }
   }
 
