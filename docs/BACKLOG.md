@@ -36,7 +36,7 @@ None of it is a GitHub issue.
 - [Documentation](#documentation) — DOC3–DOC4 · 2
 - [Release pipeline](#release-pipeline) — REL1–REL4 · 4
 - [Chart configuration surface](#chart-configuration-surface) — N1 · 1
-- [Security Phase 1 deferrals](#security-phase-1-deferrals) — H1–H8 · 2
+- [Security Phase 1 deferrals](#security-phase-1-deferrals) — H1–H12 · 3
 - [Security Phase 2 deferrals](#security-phase-2-deferrals) — C3–C11 · 7
 - [Security Phase 3 deferrals](#security-phase-3-deferrals) — K4
 - [Agent M1 deferrals (#328)](#agent-m1-deferrals-328) — A1–A8 · 7
@@ -2143,6 +2143,30 @@ bypass.
 
 ---
 
+### H12. A `jwtVerify` failure in the proxy leaves a log line and no audit event
+
+The proxy refuses a request on three grounds and audits two of them. `src/proxy.ts` emits
+`origin_mismatch` at `:65` and `insufficient_role` at `:156`, both through `emitAuditEvent`. The third
+is the trailing `catch` at `:173-176`: a token that fails `jwtVerify` because it is forged, tampered,
+expired or truncated falls into `logger.warn("JWT verification failed, redirecting to login")` and
+redirects. Nothing reaches the audit channel.
+
+An operator reading `GET /api/admin/audit` sees origin and role refusals and no forged-token attempts
+at all, which is the direction the blind spot matters: those are the probes a deployment most wants
+counted. The stdout line still exists and still lands in the aggregator, so the evidence is not lost,
+only off the surface an operator is pointed at.
+
+Recorded here rather than fixed with the note, because closing it is a behaviour change rather than a
+wording one: the catch has to distinguish a verification failure from a missing token, since
+`/login` redirects with no cookie are ordinary logged-out traffic and the note already excludes them.
+Whatever emits needs its own test in `tests/security/auth-audit.test.ts`, and the emit is metered
+through the anon bucket like every other `permission_denied` line.
+
+**Done when:** the verification-failure arm of that catch emits an audit event naming the route and
+the reason, distinct from a missing token, with the row 1.4 residual in `docs/SECURITY.md` deleted.
+
+---
+
 ## Security Phase 2 deferrals
 
 Each was decided during Phase 2, not overlooked. Lettered `C` (supply **C**hain) because the SQL
@@ -2543,50 +2567,25 @@ the new signal — and when classification no longer depends on a substring a ta
 satisfy. Driver error codes (PostgreSQL `SQLSTATE`, SQLite `errcode`) are the signal that does not
 collide, and each provider already has access to its own.
 
-### B5. The agent run ledger assumes one writer per run, and cannot enforce it
+### B5. The agent run ledger cannot fence two writers, so single ownership has to be asserted above it
 
 `run-store.ts` and `run-service.ts` are append-only over the durable world's stream primitives, which
 offer no compare-and-append: a writer cannot say "append this only if the stream is still at index N".
-Every operation is read-then-append. Two consequences follow that a single-writer run never meets:
+Two consequences follow, and only the process-local half of the second is closed:
 
 - **Two concurrent opens on one caller-supplied run id write two headers.** The fold refuses a ledger
   with a second header (`MALFORMED_LEDGER`), permanently, for every later read. The race does not
-  resolve in one side's favour — it bricks the run. Nothing minted internally can collide (UUIDv4, 122
-  random bits), so reaching this needs a caller that supplies its own id, which is what the
-  workflow-run-id path does.
-- **Two loops driving one running run would both perform the same step.** `runStep` reads the ledger,
-  sees the step neither settled nor invoked, and appends its invocation. Two readers of the same state
-  both pass that check. The write-ahead ordering makes a step at-most-once *per loop*, not *per run*.
-  The milestone's "no tool execution performed twice" criterion is about a restart, where the dead
-  process is gone by construction, and that case is genuinely covered.
-
-Not defended at the storage layer because every cross-process defence available is worse than the
-constraint: a lock file is single-instance only (which the Postgres backend exists to escape), and a
-lease in the ledger is a distributed-lock design with its own expiry semantics. Single ownership of a
-running workflow belongs to the layer above.
-
-How strong the guarantee is depends on the backend. On the zero-config local world it holds by
-construction: the queue awaits each delivery before attempting the next, so retries are sequential. On
-the opt-in Postgres backend a visibility-timeout redelivery can overlap a handler that is still alive,
-which is where the second bullet would bite.
-
-**Severity is a function of B9.** Nothing delivers an agent drive today: `mintAgentDriveToken` has no
-production caller, there is no `"use workflow"` function and no queue producer, so a run is driven
-exactly once, in the process that opened it. A second drive is not reachable through the product on
-either backend. Producing one takes a caller that mints its own drive credential from `JWT_SECRET`,
-which is how the fence below was exercised against a live run rather than only in a test. Closing B9 is
-what makes this live — and in that order, because a producer without the fence is a redelivery that runs
-the user's statement a second time.
-
-The process-local half of the fence exists (2026-08). `claimDrive`/`releaseDrive` refuse a second
-concurrent drive of one run inside a single process, and `AgentRunStore.append` refuses an append once
-the run's stream has been closed (`RUN_ALREADY_CLOSED`), turning the silent-loss mode into a loud
-refusal. The cross-process half is open: two replicas would still both pass the read-then-append check.
+  resolve in one side's favour — it bricks the run. Run creation still has to be serialized by its
+  caller.
+- **Two loops driving one running run would both perform the same step.** The drive claim is now a
+  DURABLE ledger record — `drive-claimed`/`drive-released` — rather than a memory-only set, and
+  `tryClaimDrive` serializes check-then-append per store instance (#998, pinned by a fifty-claim
+  concurrency test). The cross-process half is open: two replicas would still both pass the
+  read-then-append check, because the durable world offers no tail-index conditional append (B16).
 
 **Done when:** the ledger can append conditionally on the stream's tail index, or the single-ownership
-guarantee the runtime provides is asserted by a test rather than assumed by prose. The process-local
-claim is asserted in `tests/unit/lib/agent/run-service.test.ts`, the append-after-close guard in
-`tests/unit/lib/agent/run-store.test.ts`.
+guarantee is asserted for every backend a deployment can reach. The process-local durable claim is
+asserted in `tests/unit/lib/agent/run-store.test.ts`.
 
 ### B6. Every agent cost ceiling is per-drive, so N resumes cost up to N times one drive's budget
 
