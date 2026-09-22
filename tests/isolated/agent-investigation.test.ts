@@ -3028,7 +3028,7 @@ describe("pause is honoured at the next checkpoint", () => {
     const run = await startRun(b);
     const script = scriptedModel(async () => {
       // Recorded while the model "answers": the loop's next checkpoint is the step.
-      await b.service.pauseRun(run.runId);
+      await b.service.pause(run.runId);
       return chatToolCallStream("run_read_query", JSON.stringify({ sql: "SELECT id FROM orders" }));
     });
 
@@ -3052,7 +3052,7 @@ describe("pause is honoured at the next checkpoint", () => {
     const b = boot(freshDataDir());
     const run = await startRun(b);
     const script = scriptedModel(async () => {
-      await b.service.pauseRun(run.runId);
+      await b.service.pause(run.runId);
       return chatToolCallStream("inspect_schema", JSON.stringify({ table: "orders" }));
     });
 
@@ -3074,7 +3074,7 @@ describe("pause is honoured at the next checkpoint", () => {
     const b = boot(freshDataDir(), {
       answer: async (sql) => {
         if (runId !== "" && String(sql).includes("SELECT id FROM orders")) {
-          await service?.pauseRun(runId);
+          await service?.pause(runId);
         }
         return queryResult();
       },
@@ -3101,7 +3101,7 @@ describe("pause is honoured at the next checkpoint", () => {
     const script = scriptedModel(callsTool("run_read_query", { sql: "SELECT id FROM orders" }), async (turn) => {
       // Recorded while the model "answers" its final turn: the report it already
       // composed must still land, and the drive must not finish the run over it.
-      await b.service.pauseRun(run.runId);
+      await b.service.pause(run.runId);
       return chatToolCallStream(
         "compose_report",
         JSON.stringify({
@@ -3142,7 +3142,7 @@ describe("pause is honoured at the next checkpoint", () => {
     });
     const run = await startRun(b, "agent", "database-assessment");
     const script = scriptedModel(async () => {
-      await b.service.pauseRun(run.runId);
+      await b.service.pause(run.runId);
       return chatToolCallStream("profile_table", JSON.stringify({ table: "orders" }));
     });
 
@@ -3161,7 +3161,7 @@ describe("pause is honoured at the next checkpoint", () => {
     const b = boot(freshDataDir());
     const run = await startRun(b);
     await b.service.markRunning(run.runId);
-    await b.service.pauseRun(run.runId);
+    await b.service.pause(run.runId);
     const script = scriptedModel(answersProse("never asked"));
 
     const result = await runInvestigation(run.runId, {

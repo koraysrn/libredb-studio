@@ -167,24 +167,30 @@ export interface AgentInvestigationOptions {
  */
 export type AgentInvestigationStopReason = AgentRunStopReason;
 
+/** The fields every drive outcome carries, terminal or paused. */
+export interface AgentInvestigationResultBase {
+  readonly runId: string;
+  /** Model turns this drive took. A resumed run counts its own, not the dead one's. */
+  readonly turns: number;
+  /** The model's last prose. A planning run's whole output; an agent run's aside. */
+  readonly text: string;
+}
+
+/**
+ * What one drive ended with. The union keeps `status` and `stopReason` tied
+ * together: a terminal status always carries a stop reason, and `paused` never
+ * does, so a reader who narrows on the status knows from the type alone.
+ */
 export type AgentInvestigationResult =
-  | {
-      readonly runId: string;
+  | (AgentInvestigationResultBase & {
       readonly status: AgentRunTerminalStatus;
       readonly stopReason: AgentInvestigationStopReason;
-      /** Model turns this drive took. A resumed run counts its own, not the dead one's. */
-      readonly turns: number;
-      /** The model's last prose. A planning run's whole output; an agent run's aside. */
-      readonly text: string;
-    }
-  | {
-      readonly runId: string;
+    })
+  | (AgentInvestigationResultBase & {
       /** The drive stopped at the pause checkpoint; the run is left paused, not ended. */
       readonly status: "paused";
       readonly stopReason: null;
-      readonly turns: number;
-      readonly text: string;
-    };
+    });
 
 /**
  * The tools that reach the database. The ledger-only ones are handled apart.
@@ -4048,9 +4054,9 @@ async function handleCall(input: {
   // the ledger has not seen: a resumed run that replays a call must not write a
   // second draft for it.
   if (draft !== null && !known.has(stepId)) {
-    // A pause recorded while the model was thinking — or while the previous call
-    // executed — must stop the drive before the next ledger write: the draft is
-    // gated on RUNNING, and runStep's own checkpoint has not been reached yet.
+    // Not a safety gate anymore — `recordEvent` now accepts a paused run — but still
+    // worth the read: a pause means "take no new step", and narrating a draft the
+    // user will never see run would record a step the drive then refuses to perform.
     const live = await service.status(record.runId);
     if (live?.record.status === "paused") return { kind: "paused" };
     await service.recordEvent(record.runId, { kind: "statement-drafted", stepId, ...draft });

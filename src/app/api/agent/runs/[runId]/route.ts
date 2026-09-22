@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { accessAgentRun } from "@/lib/api/agent-run-access";
 import { createErrorResponse } from "@/lib/api/errors";
+import { AgentRunServiceError } from "@/lib/agent/run-service";
+import { driveAgentRun } from "@/lib/agent/runtime";
+import { logger } from "@/lib/logger";
 
 /**
  * One run: what it is doing, and asking it to stop (#329 T9).
@@ -44,6 +47,10 @@ export async function DELETE(req: Request, { params }: RunParams) {
  * Pauses or resumes the run. Pause lands only on a
  * RUNNING run; resume only on a PAUSED one — the service refuses anything else,
  * so the rail renders whichever control the ledger says the service can honour.
+ *
+ * Resume also drives the run again in this process: the run is being watched, so
+ * continuing it must not wait for the orphan-reaper's staleness window (B9's
+ * sweep was built for runs a dead process left, not for a user pressing Resume).
  */
 export async function PATCH(req: Request, { params }: RunParams) {
   const { runId } = await params;
@@ -58,10 +65,28 @@ export async function PATCH(req: Request, { params }: RunParams) {
   }
 
   try {
-    if (action === "pause") return NextResponse.json(await access.service.pauseRun(runId));
-    if (action === "resume") return NextResponse.json(await access.service.resumeRun(runId));
+    if (action === "pause") return NextResponse.json(await access.service.pause(runId));
+    if (action === "resume") {
+      const record = await access.service.unpause(runId);
+      // Driven in this process, the way the start route drives a fresh run. The
+      // run's durability does not depend on this call surviving: everything it
+      // does is written to the ledger first, and a drive that dies leaves a run
+      // the sweep can still pick up.
+      void driveAgentRun(runId).catch((error: unknown) => {
+        logger.error("Agent run unpause drive ended in failure", error, {
+          route: "PATCH /api/agent/runs/[runId]",
+          runId,
+        });
+      });
+      return NextResponse.json(record);
+    }
     return NextResponse.json({ error: `Unknown action: ${String(action)}` }, { status: 400 });
   } catch (error) {
+    // A pause/unpause refusal is a 409, never a 500: the ledger moved between the
+    // render and the click, or the action cannot be honoured — nothing broke.
+    if (error instanceof AgentRunServiceError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     return createErrorResponse(error, { route: "api/agent/runs/[runId]" });
   }
 }

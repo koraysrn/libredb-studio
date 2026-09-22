@@ -40,7 +40,7 @@ None of it is a GitHub issue.
 - [Security Phase 2 deferrals](#security-phase-2-deferrals) — C3–C11 · 7
 - [Security Phase 3 deferrals](#security-phase-3-deferrals) — K4
 - [Agent M1 deferrals (#328)](#agent-m1-deferrals-328) — A1–A8 · 7
-- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2–B82 · 23
+- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2–B83 · 24
 
 ---
 
@@ -3494,3 +3494,19 @@ attempted": neither writes a record.
 
 **Done when:** the sweep stops re-driving a run after a bounded number of consecutive unrecorded
 deaths and says so — in the run's ledger or in the operator log.
+
+### B83. A paused run holds its budget, artifacts and ledger stream until it is unpaused or cancelled
+
+Pause (#1001) added `paused` as a non-terminal state, but the state does not release the run's
+resources: `releaseExecutionRun` and the ledger `close` run only inside `finalize`, so a run paused
+for a long time keeps its budget registration, its stored artifacts and an open ledger stream.
+Cancelling a paused run releases them (cancel finalizes it immediately), and unpausing drives it
+again — but a run left paused holds them for as long as it stays paused.
+
+This is the half of the old B11 that closing it did not build. B11 asked for "a run state between
+running and terminal that releases the run's resources without ending it, and a resumed run would
+have to re-acquire them". The state exists; the release-and-re-acquire half does not.
+
+**Done when:** a paused run releases its budget and artifacts (and closes its stream) while it stays
+paused, and a resumed run re-acquires them — or the decision is recorded that pause deliberately
+retains them, with the resource bound that makes that safe.

@@ -50,6 +50,7 @@ import {
   type AgentRunWorkflowType,
   type AgentThreadContext,
 } from "@/lib/agent/types";
+import { AGENT_TERMINAL_STATUSES } from "@/lib/agent/types";
 /*
   Type-only, and deliberately so: `workflow-classifier.ts` imports the AI SDK and the
   model adapter, so a value import would pull the server's model stack into this
@@ -68,7 +69,15 @@ import { ConsentCard } from "./ConsentCard";
   live here. Same components, same comments, same accessible names — see
   `rail-parts.tsx` for why a second copy was not the answer.
 */
-import { guardReading, guardSummaryLine, HydrationControls, InfoNote, LIVE_STATUSES, QuotedBlock } from "./rail-parts";
+import {
+  guardReading,
+  guardSummaryLine,
+  HydrationControls,
+  InfoNote,
+  LIVE_STATUSES,
+  OPEN_STATUSES,
+  QuotedBlock,
+} from "./rail-parts";
 import { SafetyStrip } from "./SafetyStrip";
 import {
   type AgentBudgetGauge,
@@ -1220,7 +1229,7 @@ export function AgentRail({
     */
     const continueTarget = decided.replacesOpenRun
       ? run.thread?.steps.at(-1)?.runId
-      : run.runId !== null && !LIVE_STATUSES.has(run.timeline.status)
+      : run.runId !== null && AGENT_TERMINAL_STATUSES.has(run.timeline.status)
         ? run.runId
         : undefined;
     // Two reasons the rail withholds an id it has, and it OWNS both sentences: the
@@ -1448,7 +1457,7 @@ export function AgentRail({
    * long as this holds — the same window the stop control is offered in, because both
    * are asking about a run the server still has open.
    */
-  const runOpen = run.runId !== null && LIVE_STATUSES.has(run.timeline.status);
+  const runOpen = run.runId !== null && OPEN_STATUSES.has(run.timeline.status);
 
   /** Whether the objective is a box to type in or a line saying what was asked. */
   const objectiveEditable = !runOpen || editingObjective;
@@ -1580,6 +1589,12 @@ export function AgentRail({
     A host with no `onShowArtifact` is left alone and nothing is recorded as delivered,
     so nothing claims a result was shown; a host that gains the callback later still
     gets the answer.
+
+    A resumed run can compose a SECOND report, and both entries carry `isAnswer`, so a
+    host receives each answer as it arrives — two deliveries for one run, not one.
+    Noted rather than deduplicated: a second composition is a second statement from
+    the model, and folding the two together would be the rail deciding which answer
+    the user meant.
   */
   const shownAnswerRunId = useRef<string | null>(null);
   const shownAnswers = useRef<Set<string>>(new Set());
@@ -1611,7 +1626,7 @@ export function AgentRail({
     a capability the service cannot honour.
   */
   const canStop =
-    run.runId !== null && LIVE_STATUSES.has(run.timeline.status) && !run.timeline.stopRequested && !run.isStopping;
+    run.runId !== null && OPEN_STATUSES.has(run.timeline.status) && !run.timeline.stopRequested && !run.isStopping;
   // Pause and resume are offered only where the service can honour them: pause on
   // a live, running run; resume on a paused one.
   const canPause =
@@ -1673,7 +1688,7 @@ export function AgentRail({
   */
   const activeRunId = run.runId;
   const showArtifact =
-    onShowArtifact === undefined || activeRunId === null || !LIVE_STATUSES.has(run.timeline.status)
+    onShowArtifact === undefined || activeRunId === null || !OPEN_STATUSES.has(run.timeline.status)
       ? undefined
       : (correlationId: string, chartSpec: AgentChartSpec | undefined) =>
           // The key is absent rather than undefined when there is no chart: the

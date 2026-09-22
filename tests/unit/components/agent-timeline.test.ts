@@ -17,11 +17,12 @@ import { describe, test, expect } from "bun:test";
 import { foldLedgerEntries, parseLedgerLine } from "@/components/agent/timeline";
 import { AGENT_MAX_REPAIR_ATTEMPTS, AGENT_WORKFLOW_BUDGETS } from "@/lib/agent/execution-policy";
 import { PLAN_NO_STATEMENT_MARKER } from "@/lib/agent/plan-draft";
-import type { AgentLedgerEntry } from "@/lib/agent/run-store";
+import { nextStatus, type AgentLedgerEntry } from "@/lib/agent/run-store";
 import {
   DEFAULT_AGENT_WORKFLOW_READING,
   DEFAULT_AGENT_WORKFLOW_SOURCE,
   DEFAULT_AGENT_WORKFLOW_TYPE,
+  type AgentRunStatus,
 } from "@/lib/agent/types";
 
 const OPENED: AgentLedgerEntry = {
@@ -37,6 +38,25 @@ const OPENED: AgentLedgerEntry = {
 function event(event: AgentLedgerEntry & { kind: "event" }): AgentLedgerEntry {
   return event;
 }
+
+describe("the two status folds agree", () => {
+  test("run-store's nextStatus and the timeline fold answer the same status", () => {
+    const entries: readonly AgentLedgerEntry[] = [
+      OPENED,
+      event({ kind: "event", event: { kind: "run-started", atMs: 2, mode: "agent" } }),
+      event({ kind: "event", event: { kind: "run-paused", atMs: 3 } }),
+      event({ kind: "event", event: { kind: "run-resumed", atMs: 4 } }),
+      event({ kind: "event", event: { kind: "run-finished", atMs: 5, status: "succeeded", stopReason: "model-stopped" } }),
+    ];
+
+    let status: AgentRunStatus = "queued";
+    for (const entry of entries) {
+      if (entry.kind === "event") status = nextStatus(status, entry.event);
+    }
+
+    expect(foldLedgerEntries(entries).status).toBe(status);
+  });
+});
 
 describe("parseLedgerLine", () => {
   test("reads a run-opened header", () => {

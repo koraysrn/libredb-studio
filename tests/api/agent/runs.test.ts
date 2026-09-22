@@ -120,13 +120,13 @@ const mockCancel = mock(async (runId: string) => {
   return { record, cancellationRequested: true };
 });
 
-const mockPauseRun = mock(async (runId: string) => {
+const mockPause = mock(async (runId: string) => {
   const record = runs.get(runId);
   if (record === undefined) return null;
   return { ...record, status: "paused" };
 });
 
-const mockResumeRun = mock(async (runId: string) => {
+const mockUnpause = mock(async (runId: string) => {
   const record = runs.get(runId);
   if (record === undefined) return null;
   return { ...record, status: "running" };
@@ -165,8 +165,8 @@ function installMocks(): void {
       status: mockStatus,
       cancel: mockCancel,
       stream: mockStream,
-      pauseRun: mockPauseRun,
-      resumeRun: mockResumeRun,
+      pause: mockPause,
+      unpause: mockUnpause,
     })),
     driveAgentRun: mockDriveAgentRun,
     // Listed although this file's routes never call it: the replacement is
@@ -206,8 +206,8 @@ beforeEach(() => {
   mockAdmitAgentModel.mockImplementation(async () => ({ kind: "allowed", protocol: "native" }));
   mockStart.mockClear();
   mockResolveConnection.mockClear();
-  mockPauseRun.mockClear();
-  mockResumeRun.mockClear();
+  mockPause.mockClear();
+  mockUnpause.mockClear();
 });
 
 afterEach(() => {
@@ -1173,10 +1173,10 @@ describe("PATCH /api/agent/runs/[runId]", () => {
 
     expect(res.status).toBe(200);
     expect(body.status).toBe("paused");
-    expect(mockPauseRun).toHaveBeenCalledWith("arun_1");
+    expect(mockPause).toHaveBeenCalledWith("arun_1");
   });
 
-  test("resumes a run", async () => {
+  test("resumes a run and drives it again in this process", async () => {
     const res = await PATCH(
       createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "resume" } }),
       params("arun_1"),
@@ -1185,7 +1185,10 @@ describe("PATCH /api/agent/runs/[runId]", () => {
 
     expect(res.status).toBe(200);
     expect(body.status).toBe("running");
-    expect(mockResumeRun).toHaveBeenCalledWith("arun_1");
+    expect(mockUnpause).toHaveBeenCalledWith("arun_1");
+    // The whole point of Resume: the run is picked up now, not at the reaper's
+    // staleness threshold.
+    expect(mockDriveAgentRun).toHaveBeenCalledWith("arun_1");
   });
 
   test("refuses an action the service has no words for", async () => {
@@ -1209,15 +1212,26 @@ describe("PATCH /api/agent/runs/[runId]", () => {
     expect(res.status).toBe(400);
   });
 
-  test("reports a service refusal instead of a bare 500", async () => {
-    mockPauseRun.mockRejectedValueOnce(new AgentRunServiceError("RUN_NOT_RUNNING", "the run is not running"));
+  test("reports a service refusal as a 409, never a 500", async () => {
+    mockPause.mockRejectedValueOnce(new AgentRunServiceError("RUN_NOT_RUNNING", "the run is not running"));
 
     const res = await PATCH(
       createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "pause" } }),
       params("arun_1"),
     );
 
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(409);
+  });
+
+  test("refuses to pause a run that was already asked to stop, with a 409", async () => {
+    mockPause.mockRejectedValueOnce(new AgentRunServiceError("RUN_CANCELLATION_PENDING", "the run has a pending cancellation"));
+
+    const res = await PATCH(
+      createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "pause" } }),
+      params("arun_1"),
+    );
+
+    expect(res.status).toBe(409);
   });
 
   test("another session cannot pause the run", async () => {
@@ -1229,7 +1243,7 @@ describe("PATCH /api/agent/runs/[runId]", () => {
     );
 
     expect(res.status).toBe(404);
-    expect(mockPauseRun).not.toHaveBeenCalled();
+    expect(mockPause).not.toHaveBeenCalled();
   });
 });
 

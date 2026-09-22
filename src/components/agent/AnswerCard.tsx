@@ -17,6 +17,7 @@ import {
   HydrationControls,
   InfoNote,
   LIVE_STATUSES,
+  OPEN_STATUSES,
   QuotedBlock,
 } from "./rail-parts";
 import {
@@ -456,11 +457,14 @@ function PlanChips({
  */
 export function answerCardState(timeline: AgentRunTimeline): AnswerState | null {
   if (timeline.items.length === 0) return null;
+  // A paused run is not finished: it holds its resources and will be driven again,
+  // so whatever it has composed so far is not yet "the answer".
+  if (timeline.status === "paused") return "running";
   if (timeline.items.some((item) => item.planStatement !== undefined)) return "plan";
   if (timeline.report !== null) return "report";
   if (timeline.items.some((item) => item.planRefusal === true)) return "refused";
   if (timeline.status === "failed") return "failed";
-  return LIVE_STATUSES.has(timeline.status) ? "running" : null;
+  return OPEN_STATUSES.has(timeline.status) ? "running" : null;
 }
 
 export function AnswerCard({

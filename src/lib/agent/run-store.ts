@@ -374,7 +374,7 @@ function entryAtMs(entry: AgentLedgerEntry): number {
   return entry.kind === "event" ? entry.event.atMs : entry.atMs;
 }
 
-function nextStatus(current: AgentRunStatus, event: AgentRunEvent): AgentRunStatus {
+export function nextStatus(current: AgentRunStatus, event: AgentRunEvent): AgentRunStatus {
   if (event.kind === "run-started") return "running";
   if (event.kind === "run-paused") return "paused";
   if (event.kind === "run-resumed") return "running";

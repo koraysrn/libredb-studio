@@ -91,39 +91,36 @@ Two companion pages carry what this one deliberately does not:
 
 ## Table of Contents
 
-- [Agent Runtime — LibreDB Studio](#agent-runtime--libredb-studio)
-  - [Table of Contents](#table-of-contents)
-  - [Turning it on](#turning-it-on)
-  - [What a run is](#what-a-run-is)
-    - [The conversation a run belongs to](#the-conversation-a-run-belongs-to)
-    - [What a plan run knows](#what-a-plan-run-knows)
-    - [What the inventory is an inventory OF](#what-the-inventory-is-an-inventory-of)
-    - [The statement a plan run drafts](#the-statement-a-plan-run-drafts)
-  - [Durability and resume](#durability-and-resume)
-    - [A drive that dies before the loop](#a-drive-that-dies-before-the-loop)
-  - [The tool set](#the-tool-set)
-    - [The query-optimization template](#the-query-optimization-template)
-    - [The database-assessment template](#the-database-assessment-template)
-    - [The operations template](#the-operations-template)
-    - [The data-analysis template](#the-data-analysis-template)
-    - [Presenting an answer](#presenting-an-answer)
-    - [Handing the answer to the editor (auto-execute)](#handing-the-answer-to-the-editor-auto-execute)
-    - [What the fence is proved to hold against](#what-the-fence-is-proved-to-hold-against)
-  - [What bounds a run](#what-bounds-a-run)
-  - [Supported models](#supported-models)
-  - [The model side](#the-model-side)
-    - [What a refused model looks like in the app](#what-a-refused-model-looks-like-in-the-app)
-  - [Whether the run answered](#whether-the-run-answered)
-    - [The eval harness](#the-eval-harness)
-  - [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
-  - [HTTP surface](#http-surface)
-  - [The surface in the app](#the-surface-in-the-app)
-  - [Deployment](#deployment)
-  - [Package boundary](#package-boundary)
-  - [Module map](#module-map)
-  - [Known limitations](#known-limitations)
-  - [Related documentation](#related-documentation)
-
+- [Turning it on](#turning-it-on)
+- [What a run is](#what-a-run-is)
+  - [The conversation a run belongs to](#the-conversation-a-run-belongs-to)
+  - [What a plan run knows](#what-a-plan-run-knows)
+  - [What the inventory is an inventory OF](#what-the-inventory-is-an-inventory-of)
+  - [The statement a plan run drafts](#the-statement-a-plan-run-drafts)
+- [Durability and resume](#durability-and-resume)
+  - [A drive that dies before the loop](#a-drive-that-dies-before-the-loop)
+- [The tool set](#the-tool-set)
+  - [The query-optimization template](#the-query-optimization-template)
+  - [The database-assessment template](#the-database-assessment-template)
+  - [The operations template](#the-operations-template)
+  - [The data-analysis template](#the-data-analysis-template)
+  - [Presenting an answer](#presenting-an-answer)
+  - [Handing the answer to the editor (auto-execute)](#handing-the-answer-to-the-editor-auto-execute)
+  - [What the fence is proved to hold against](#what-the-fence-is-proved-to-hold-against)
+- [What bounds a run](#what-bounds-a-run)
+- [Supported models](#supported-models)
+- [The model side](#the-model-side)
+  - [What a refused model looks like in the app](#what-a-refused-model-looks-like-in-the-app)
+- [Whether the run answered](#whether-the-run-answered)
+  - [The eval harness](#the-eval-harness)
+- [What the removed AI panels did that a run does not](#what-the-removed-ai-panels-did-that-a-run-does-not)
+- [HTTP surface](#http-surface)
+- [The surface in the app](#the-surface-in-the-app)
+- [Deployment](#deployment)
+- [Package boundary](#package-boundary)
+- [Module map](#module-map)
+- [Known limitations](#known-limitations)
+- [Related documentation](#related-documentation)
 ## Turning it on
 
 **There is nothing to turn on.** Availability is derived from two conditions, both checkable at
@@ -2164,7 +2161,7 @@ that follows. What green rules out is a fault that was already on disk when the 
 | `DELETE /api/agent/runs/{runId}` | Requests a stop. Cancellation is enforced by the run loop's own persisted state, not by a driver cancel propagating — so this is "asked to stop", not "has stopped". |
 | `GET /api/agent/runs/{runId}/stream` | The ledger as NDJSON, one entry per line. |
 | `GET /api/agent/runs/{runId}/artifacts/{correlationId}` | One stored result of that run, for hydration. |
-| `POST /api/agent/drive` | The machine-facing resume seam. |
+| `POST /api/agent/drive` | The machine-facing resume seam. Its response is the drive's outcome: a terminal status with a `stopReason`, or `{"status":"paused","stopReason":null}` when the drive found the run paused and claimed nothing. |
 
 **`src/proxy.ts`'s public-path list is unchanged, and a test asserts that.** The drive route is the
 only route reachable without a user session, and it is not exempt from the middleware: it carries a
@@ -2678,6 +2675,9 @@ the role's own grants are the whole boundary (A3).
   entry was filed about, reached through a proxy rather than through a malformed seed file. Not
   fixed here because separating "unasked" from "measured empty" changes a type every consumer
   reads, and two tests currently pin the wrong half as intended.
+- **B83** — a paused run holds its budget, artifacts and ledger stream until it is unpaused or
+  cancelled, because `releaseExecutionRun` and `close` run only inside `finalize`. Cancelling a
+  paused run releases them; a run left paused does not.
 
 **Settled as limits rather than as work.** The eight below have no entry in `docs/BACKLOG.md`, and
 that is the point: each is how the product behaves, stated where a reader of this document will meet

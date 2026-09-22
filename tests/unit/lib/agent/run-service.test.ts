@@ -1113,7 +1113,7 @@ describe("AgentRunService — pause and resume", () => {
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
 
-    const record = await h.service.pauseRun(runId);
+    const record = await h.service.pause(runId);
 
     expect(record.status).toBe("paused");
     expect(record.events.map((entry) => entry.kind)).toEqual(["run-started", "run-paused"]);
@@ -1123,7 +1123,7 @@ describe("AgentRunService — pause and resume", () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
-    await h.service.pauseRun(runId);
+    await h.service.pause(runId);
 
     await h.service.recordEvent(runId, {
       kind: "statement-drafted",
@@ -1145,7 +1145,7 @@ describe("AgentRunService — pause and resume", () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
-    await h.service.pauseRun(runId);
+    await h.service.pause(runId);
 
     const error = await captureServiceError(() => h.service.finish(runId, "failed"));
 
@@ -1158,9 +1158,9 @@ describe("AgentRunService — pause and resume", () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
-    await h.service.pauseRun(runId);
+    await h.service.pause(runId);
 
-    const record = await h.service.resumeRun(runId);
+    const record = await h.service.unpause(runId);
 
     expect(record.status).toBe("running");
     expect(record.events.map((entry) => entry.kind)).toEqual(["run-started", "run-paused", "run-resumed"]);
@@ -1170,7 +1170,7 @@ describe("AgentRunService — pause and resume", () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
 
-    expect((await captureServiceError(() => h.service.pauseRun(runId))).reasonCode).toBe("RUN_NOT_RUNNING");
+    expect((await captureServiceError(() => h.service.pause(runId))).reasonCode).toBe("RUN_NOT_RUNNING");
   });
 
   test("resuming a run that is not paused refuses", async () => {
@@ -1178,14 +1178,49 @@ describe("AgentRunService — pause and resume", () => {
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
 
-    expect((await captureServiceError(() => h.service.resumeRun(runId))).reasonCode).toBe("RUN_NOT_PAUSED");
+    expect((await captureServiceError(() => h.service.unpause(runId))).reasonCode).toBe("RUN_NOT_PAUSED");
+  });
+
+  test("cancelling a paused run ends it immediately, with no pending request", async () => {
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+    await h.service.pause(runId);
+
+    const report = await h.service.cancel(runId, OTHER_ACTOR);
+
+    expect(report.record.status).toBe("cancelled");
+    expect(report.cancellationRequested).toBe(false);
+    expect(report.record.events.at(-1)).toMatchObject({ kind: "run-finished", status: "cancelled" });
+  });
+
+  test("pausing a run with a pending cancellation refuses", async () => {
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+    await h.service.cancel(runId, OTHER_ACTOR);
+
+    const error = await captureServiceError(() => h.service.pause(runId));
+
+    expect(error.reasonCode).toBe("RUN_CANCELLATION_PENDING");
+  });
+
+  test("pausing a run that just ended answers its current state", async () => {
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+    await h.service.finish(runId, "succeeded", { stopReason: "model-stopped" });
+
+    const record = await h.service.pause(runId);
+
+    expect(record.status).toBe("succeeded");
   });
 
   test("a paused run is not terminal, and the next step reads the pause checkpoint", async () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
     await h.service.markRunning(runId);
-    await h.service.pauseRun(runId);
+    await h.service.pause(runId);
 
     const report = await h.service.status(runId);
     expect(report?.record.status).toBe("paused");
@@ -1212,7 +1247,7 @@ describe("AgentRunService — pause and resume", () => {
     await h.service.markRunning(runId);
 
     const first = await h.service.runStep(runId, { stepId: "s1", tool: "run_read_query" }, async () => {
-      await h.service.pauseRun(runId);
+      await h.service.pause(runId);
       return COMPLETED(runId);
     });
     expect(first.kind).toBe("performed");

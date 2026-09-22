@@ -20,26 +20,16 @@ needs the mechanism behind it, it links there instead of restating it.
 
 ## Contents
 
-- [The agent, for the person using it](#the-agent-for-the-person-using-it)
-  - [Contents](#contents)
-  - [Where the agent is](#where-the-agent-is)
-  - [What a run is](#what-a-run-is)
-    - [What a Plan run knows about your database](#what-a-plan-run-knows-about-your-database)
-  - [The four workflows](#the-four-workflows)
-    - [Investigate](#investigate)
-    - [Optimize](#optimize)
-    - [Assess](#assess)
-    - [Operate](#operate)
-  - [What you see while a run goes](#what-you-see-while-a-run-goes)
-  - [Auto-execute: when the run runs the answer in your editor](#auto-execute-when-the-run-runs-the-answer-in-your-editor)
-  - [What "answered" means](#what-answered-means)
-  - [The budget meter's numbers](#the-budget-meters-numbers)
-  - [When the model is refused](#when-the-model-is-refused)
-  - [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
-    - [What was measured](#what-was-measured)
-  - [Returning to earlier conversations](#returning-to-earlier-conversations)
-  - [What the agent does not do](#what-the-agent-does-not-do)
-
+- [Where the agent is](#where-the-agent-is)
+- [What a run is](#what-a-run-is)
+- [The four workflows](#the-four-workflows)
+- [What you see while a run goes](#what-you-see-while-a-run-goes)
+- [What "answered" means](#what-answered-means)
+- [The budget meter's numbers](#the-budget-meters-numbers)
+- [When the model is refused](#when-the-model-is-refused)
+- [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
+- [Returning to earlier conversations](#returning-to-earlier-conversations)
+- [What the agent does not do](#what-the-agent-does-not-do)
 ## Where the agent is
 
 The rail is part of the **standalone application only** — the embedded `@libredb/studio` package
@@ -978,9 +968,11 @@ Stated plainly, because a surface that hides its edges is the one that surprises
 - **It never executes a recommendation**, and never applies one to your editor by itself. The single
   exception anywhere in the rail is auto-execute, which is off unless the run was opened with it, and
   which covers only the answer's own statement under the three conditions above.
-- **It can be paused and resumed from the rail.** Pause lands only on a live run; Resume continues a
-  paused one. A paused run is not terminal — its report and stored rows stay reachable, and resuming
-  continues the same run with its remaining ceilings.
+- **It can be paused and resumed from the rail.** Pause lands only on a running run that was not
+  asked to stop; Resume drives the paused run again in this process. A paused run is not terminal —
+  its stored rows stay reachable — but its ceilings are per drive, so a resume re-derives them rather
+  than carrying over the earlier drive's remainder, and it holds its budget and artifacts until it is
+  unpaused or cancelled (B83).
 - **A stopped run stops at its next checkpoint**, not instantly: cancellation is enforced by the run
   loop's own persisted state, and the checkpoint sits in the step that reaches a database. A run that
   was already composing its report therefore finishes it and answers — twice on 2026-08-12 it did,
