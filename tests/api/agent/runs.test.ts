@@ -7,11 +7,12 @@
  * flag is off.
  */
 
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
 import { configureAgentModel, restoreAgentModel } from "../../helpers/agent-model-env";
 import { createMockRequest, parseResponseJSON } from "../../helpers/mock-next";
 import { AGENT_ENABLED_ENV } from "@/lib/agent/config";
 import { AgentRunServiceError } from "@/lib/agent/run-service";
+import { logger } from "@/lib/logger";
 import { clearRateLimitState } from "@/lib/api/rate-limit";
 import * as realAuth from "@/lib/auth";
 import * as realSeed from "@/lib/seed/resolve-connection";
@@ -1189,6 +1190,39 @@ describe("PATCH /api/agent/runs/[runId]", () => {
     // The whole point of Resume: the run is picked up now, not at the reaper's
     // staleness threshold.
     expect(mockDriveAgentRun).toHaveBeenCalledWith("arun_1");
+  });
+
+  test("a resume whose re-drive fails logs the failure without failing the resume", async () => {
+    mockDriveAgentRun.mockRejectedValueOnce(new Error("model unreachable"));
+    const error = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const res = await PATCH(
+        createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "resume" } }),
+        params("arun_1"),
+      );
+      const body = await parseResponseJSON<{ status: string }>(res);
+      // The re-drive is fire-and-forget: its failure lands on the server log, not on
+      // the response, which already answered from the ledger.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(res.status).toBe(200);
+      expect(body.status).toBe("running");
+      expect(mockDriveAgentRun).toHaveBeenCalledWith("arun_1");
+      expect(error).toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  test("a pause that fails for a reason the service cannot name still answers 500, not 409", async () => {
+    mockPause.mockRejectedValueOnce(new Error("ledger corrupted"));
+
+    const res = await PATCH(
+      createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "pause" } }),
+      params("arun_1"),
+    );
+
+    expect(res.status).toBe(500);
   });
 
   test("refuses an action the service has no words for", async () => {
