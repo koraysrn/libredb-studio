@@ -293,10 +293,9 @@ export type AgentRunStatus = "queued" | "running" | "paused" | AgentRunTerminalS
  * and on the follow-up path that is a legitimate conversation refused with a message
  * that names nothing — the caller is told only that the run may not be continued.
  *
- * The rail's `LIVE_STATUSES` and `OPEN_STATUSES` are deliberately NOT derived from
- * this: `queued | running` and `queued | running | paused` are each drift-safe on
- * their own, since a new terminal status correctly reads as neither live nor open.
- * This one is the direction that needed pinning.
+ * The rail's `OPEN_STATUSES` is deliberately NOT derived from this: `queued |
+ * running | paused` is drift-safe on its own, since a new terminal status correctly
+ * reads as not open. This one is the direction that needed pinning.
  */
 const TERMINAL_STATUS_MEMBERS = {
   succeeded: true,

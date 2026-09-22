@@ -25,12 +25,6 @@ import type { AgentPlanStatementView } from "./timeline";
  */
 
 /**
- * A run that is actively doing work: it has a drive in flight, or is queued for
- * one. Keyed off for "is producing entries right now", not for "may be acted on".
- */
-export const LIVE_STATUSES: ReadonlySet<AgentRunStatus> = new Set<AgentRunStatus>(["queued", "running"]);
-
-/**
  * A run that has not ended: queued, running, or paused. Controls that act on a
  * run at all — stop, show-result, keeping the rail open — key off this, because a
  * paused run is not terminal and still holds its budget, artifacts and stream.
