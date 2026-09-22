@@ -1216,6 +1216,45 @@ describe("AgentRunService — pause and resume", () => {
     expect(record.status).toBe("succeeded");
   });
 
+  test("pausing a run another writer finished mid-pause answers with its terminal record", async () => {
+    // The same race `cancel` tolerates, on the pause path: the read sees a running
+    // run, another writer finalizes it (append + close), and only then does the
+    // `run-paused` append reach the closed stream. The refusal must not escape as a
+    // 500 — the run IS ended, which is the answer the caller asked for.
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+
+    const read = h.store.read.bind(h.store);
+    spyOn(h.store, "read").mockImplementationOnce(async (id: string) => {
+      const stale = await read(id);
+      await h.service.finish(runId, "failed", { reason: "internal" });
+      return stale;
+    });
+
+    const record = await h.service.pause(runId);
+
+    expect(record.status).toBe("failed");
+  });
+
+  test("unpausing a run another writer cancelled mid-unpause answers with its terminal record", async () => {
+    const h = harness();
+    const { runId } = await h.service.start(START_INPUT);
+    await h.service.markRunning(runId);
+    await h.service.pause(runId);
+
+    const read = h.store.read.bind(h.store);
+    spyOn(h.store, "read").mockImplementationOnce(async (id: string) => {
+      const stale = await read(id);
+      await h.service.cancel(runId, OTHER_ACTOR);
+      return stale;
+    });
+
+    const record = await h.service.unpause(runId);
+
+    expect(record.status).toBe("cancelled");
+  });
+
   test("a paused run is not terminal, and the next step reads the pause checkpoint", async () => {
     const h = harness();
     const { runId } = await h.service.start(START_INPUT);
