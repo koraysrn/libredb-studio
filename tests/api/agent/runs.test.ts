@@ -1224,7 +1224,9 @@ describe("PATCH /api/agent/runs/[runId]", () => {
   });
 
   test("refuses to pause a run that was already asked to stop, with a 409", async () => {
-    mockPause.mockRejectedValueOnce(new AgentRunServiceError("RUN_CANCELLATION_PENDING", "the run has a pending cancellation"));
+    mockPause.mockRejectedValueOnce(
+      new AgentRunServiceError("RUN_CANCELLATION_PENDING", "the run has a pending cancellation"),
+    );
 
     const res = await PATCH(
       createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "pause" } }),

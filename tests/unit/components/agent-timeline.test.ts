@@ -46,7 +46,10 @@ describe("the two status folds agree", () => {
       event({ kind: "event", event: { kind: "run-started", atMs: 2, mode: "agent" } }),
       event({ kind: "event", event: { kind: "run-paused", atMs: 3 } }),
       event({ kind: "event", event: { kind: "run-resumed", atMs: 4 } }),
-      event({ kind: "event", event: { kind: "run-finished", atMs: 5, status: "succeeded", stopReason: "model-stopped" } }),
+      event({
+        kind: "event",
+        event: { kind: "run-finished", atMs: 5, status: "succeeded", stopReason: "model-stopped" },
+      }),
     ];
 
     let status: AgentRunStatus = "queued";

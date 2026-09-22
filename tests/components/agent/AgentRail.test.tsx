@@ -2283,6 +2283,42 @@ describe("AgentRail", () => {
       expect(view.queryByTestId("agent-resume")).not.toBeNull();
       expect(view.queryByTestId("agent-pause")).toBeNull();
     });
+
+    test("a paused run can still be asked to stop", async () => {
+      const view = await startRun([OPENED_LINE, STARTED_LINE, PAUSED_LINE]);
+
+      await findAllEntries(view);
+      expect(view.queryByTestId("agent-stop")).not.toBeNull();
+    });
+
+    test("a paused run still offers its stored result, because its rows are still held", async () => {
+      const onShowArtifact = mock(() => {});
+      mockAgentFetch([OPENED_LINE, STARTED_LINE, DRAFTED_LINE, COMPLETED_LINE, PAUSED_LINE]);
+      const view = render(<AgentRail {...DEFAULT_PROPS} onShowArtifact={onShowArtifact} />);
+      fireEvent.change(view.getByTestId("agent-objective"), { target: { value: "why is checkout slow" } });
+      await act(async () => {
+        fireEvent.click(view.getByTestId("agent-start"));
+      });
+
+      await findAllEntries(view);
+      expect(view.queryAllByTestId("agent-show-result")).toHaveLength(1);
+    });
+
+    test("a paused run is not rendered as a finished answer", async () => {
+      const view = await startRun([OPENED_LINE, STARTED_LINE, DRAFTED_LINE, COMPLETED_LINE, REPORT_LINE, PAUSED_LINE]);
+
+      await findAllEntries(view);
+      expect(view.queryByTestId("agent-answer-report")).toBeNull();
+      expect((await view.findByTestId("agent-answer-status")).textContent).toBe("paused");
+    });
+
+    test("a paused run is not treated as ended, so it is not offered as the run to continue from", async () => {
+      localStorage.setItem("libredb_agent_thread", JSON.stringify({ threadId: "arun_1", steps: 1 }));
+      const view = await startRun([OPENED_LINE, STARTED_LINE, PAUSED_LINE]);
+
+      await findAllEntries(view);
+      expect(view.queryByTestId("agent-thread-ended")).toBeNull();
+    });
   });
 
   /**
