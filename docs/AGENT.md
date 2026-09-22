@@ -121,6 +121,7 @@ Two companion pages carry what this one deliberately does not:
 - [Module map](#module-map)
 - [Known limitations](#known-limitations)
 - [Related documentation](#related-documentation)
+
 ## Turning it on
 
 **There is nothing to turn on.** Availability is derived from two conditions, both checkable at
@@ -2159,6 +2160,7 @@ that follows. What green rules out is a fault that was already on disk when the 
 | `POST /api/agent/runs` | Opens a run (mode, optional `workflowType`, objective, `connectionId`, and optional `previousRunId` to continue the conversation a run this session opened belongs to) and returns `202` with the run id, the PERSISTED mode and workflow type, and the `thread` the run actually belongs to. An unrecognised `workflowType` is refused rather than defaulted. An inline connection in the body is refused. A `previousRunId` that is not a non-empty string is refused `400`; one that cannot be reached does **not** refuse the start — the run opens with no conversation and `thread.declined` says so. An agent run whose workflow sends a statement is refused `400`, before any run is opened, when the connection's engine implements no read-only statement path - `operations` is admitted on every engine, and a planning run is never refused this way. An agent run whose model was established as unable to call tools is refused `422` before any run is opened. |
 | `GET /api/agent/runs/{runId}` | The run record, folded from its ledger. |
 | `DELETE /api/agent/runs/{runId}` | Requests a stop. Cancellation is enforced by the run loop's own persisted state, not by a driver cancel propagating — so this is "asked to stop", not "has stopped". |
+| `PATCH /api/agent/runs/{runId}` | Pauses or resumes the run, by `{"action": "pause"}` or `{"action": "resume"}`. Pause lands only on a running run; resume only on a paused one, and a resume that answers `running` also drives the run again in this process. A refusal is a `409` — the ledger moved between the render and the click, or the action cannot be honoured. |
 | `GET /api/agent/runs/{runId}/stream` | The ledger as NDJSON, one entry per line. |
 | `GET /api/agent/runs/{runId}/artifacts/{correlationId}` | One stored result of that run, for hydration. |
 | `POST /api/agent/drive` | The machine-facing resume seam. Its response is the drive's outcome: a terminal status with a `stopReason`, or `{"status":"paused","stopReason":null}` when the drive found the run paused and claimed nothing. |

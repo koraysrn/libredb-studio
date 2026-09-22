@@ -30,6 +30,7 @@ needs the mechanism behind it, it links there instead of restating it.
 - [Running the agent on a local model (Ollama)](#running-the-agent-on-a-local-model-ollama)
 - [Returning to earlier conversations](#returning-to-earlier-conversations)
 - [What the agent does not do](#what-the-agent-does-not-do)
+
 ## Where the agent is
 
 The rail is part of the **standalone application only** — the embedded `@libredb/studio` package
@@ -970,9 +971,11 @@ Stated plainly, because a surface that hides its edges is the one that surprises
   which covers only the answer's own statement under the three conditions above.
 - **It can be paused and resumed from the rail.** Pause lands only on a running run that was not
   asked to stop; Resume drives the paused run again in this process. A paused run is not terminal —
-  its stored rows stay reachable — but its ceilings are per drive, so a resume re-derives them rather
-  than carrying over the earlier drive's remainder, and it holds its budget and artifacts until it is
-  unpaused or cancelled (B83).
+  its stored rows stay reachable, and it holds its budget and artifacts until it is unpaused or
+  cancelled (B83). Its statement and database-time ceilings carry over from the earlier drive (the
+  ledger's completed reads), but the run's wall-clock deadline does not: it is measured from the
+  moment the run opened, so a pause spends it. A long pause can leave a resumed run with almost no
+  deadline left, and Resume then ends it `deadline-exceeded`.
 - **A stopped run stops at its next checkpoint**, not instantly: cancellation is enforced by the run
   loop's own persisted state, and the checkpoint sits in the step that reaches a database. A run that
   was already composing its report therefore finishes it and answers — twice on 2026-08-12 it did,

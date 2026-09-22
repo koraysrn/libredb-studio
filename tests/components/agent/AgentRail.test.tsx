@@ -2313,11 +2313,32 @@ describe("AgentRail", () => {
     });
 
     test("a paused run is not treated as ended, so it is not offered as the run to continue from", async () => {
-      localStorage.setItem("libredb_agent_thread", JSON.stringify({ threadId: "arun_1", steps: 1 }));
-      const view = await startRun([OPENED_LINE, STARTED_LINE, PAUSED_LINE]);
+      const fetchMock = mockAgentFetch([OPENED_LINE, STARTED_LINE, PAUSED_LINE]);
+      const view = render(<AgentRail {...DEFAULT_PROPS} />);
+      fireEvent.change(view.getByTestId("agent-objective"), { target: { value: "why is checkout slow" } });
+      await act(async () => {
+        fireEvent.click(view.getByTestId("agent-start"));
+      });
+      await waitFor(() => {
+        expect(view.getByTestId("agent-run-status").textContent).toBe("paused");
+      });
 
-      await findAllEntries(view);
-      expect(view.queryByTestId("agent-thread-ended")).toBeNull();
+      // A paused run is OPEN, so the box is a one-line summary; editing it is the way
+      // back to a box the user can ask a new question from.
+      fireEvent.click(view.getByTestId("agent-objective-edit"));
+      fireEvent.change(view.getByTestId("agent-objective"), { target: { value: "and what else is slow" } });
+      await act(async () => {
+        fireEvent.click(view.getByTestId("agent-start"));
+      });
+
+      const runCalls = (fetchMock.mock.calls as [RequestInfo | URL, RequestInit?][]).filter(
+        ([url]) => String(url) === "/api/agent/runs",
+      );
+      // Non-vacuous: the second start DID fire, so the absence below is about the
+      // paused run not being a continue target, not about nothing having happened.
+      expect(runCalls).toHaveLength(2);
+      const lastBody = JSON.parse(String(runCalls.at(-1)?.[1]?.body)) as Record<string, unknown>;
+      expect(lastBody.previousRunId).toBeUndefined();
     });
   });
 
@@ -3495,6 +3516,28 @@ describe("AgentRail", () => {
         });
         // Which is where the answer is: the card is the first thing in this container.
         expect(view.scroller.firstElementChild?.getAttribute("data-testid")).toBe("agent-answer");
+      });
+
+      test("a pause does not spend the once-per-run answer reveal", async () => {
+        const view = await startRun();
+        await act(async () => {
+          view.stream.push(OPENED_LINE);
+          view.stream.push(STARTED_LINE);
+        });
+        await waitFor(() => {
+          expect(view.scroller.scrollTop).toBe(BOTTOM);
+        });
+
+        // A paused run is OPEN, not ended: it is still following its own end, so the
+        // reveal stays unspent for the ending that will actually come.
+        await act(async () => {
+          view.stream.push(DRAFT_LINE);
+          view.stream.push(PAUSED_LINE);
+        });
+
+        await waitFor(() => {
+          expect(view.scroller.scrollTop).toBe(BOTTOM);
+        });
       });
 
       test("a reader who scrolled away is not yanked to the answer either", async () => {

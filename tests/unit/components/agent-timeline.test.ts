@@ -40,7 +40,7 @@ function event(event: AgentLedgerEntry & { kind: "event" }): AgentLedgerEntry {
 }
 
 describe("the two status folds agree", () => {
-  test("run-store's nextStatus and the timeline fold answer the same status", () => {
+  test("run-store's nextStatus and the timeline fold answer the same status at every prefix", () => {
     const entries: readonly AgentLedgerEntry[] = [
       OPENED,
       event({ kind: "event", event: { kind: "run-started", atMs: 2, mode: "agent" } }),
@@ -52,12 +52,16 @@ describe("the two status folds agree", () => {
       }),
     ];
 
+    // Compared at EVERY prefix, not only after `run-finished`: both folds take the
+    // status from that event unconditionally, so a paused disagreement would be
+    // invisible if the check waited for the end. The run-paused arm is a prefix of
+    // its own, and this is what makes it load-bearing.
     let status: AgentRunStatus = "queued";
-    for (const entry of entries) {
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
       if (entry.kind === "event") status = nextStatus(status, entry.event);
+      expect(foldLedgerEntries(entries.slice(0, i + 1)).status, `prefix ${i}`).toBe(status);
     }
-
-    expect(foldLedgerEntries(entries).status).toBe(status);
   });
 });
 

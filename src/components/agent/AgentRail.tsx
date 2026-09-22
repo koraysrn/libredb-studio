@@ -69,15 +69,7 @@ import { ConsentCard } from "./ConsentCard";
   live here. Same components, same comments, same accessible names — see
   `rail-parts.tsx` for why a second copy was not the answer.
 */
-import {
-  guardReading,
-  guardSummaryLine,
-  HydrationControls,
-  InfoNote,
-  LIVE_STATUSES,
-  OPEN_STATUSES,
-  QuotedBlock,
-} from "./rail-parts";
+import { guardReading, guardSummaryLine, HydrationControls, InfoNote, OPEN_STATUSES, QuotedBlock } from "./rail-parts";
 import { SafetyStrip } from "./SafetyStrip";
 import {
   type AgentBudgetGauge,
@@ -1679,12 +1671,14 @@ export function AgentRail({
     scoped to the run that recorded it — so the run id is bound here rather than
     threaded through every item.
 
-    It is offered only while the run is LIVE, and that is the same rule the stop
-    control follows rather than a caution: a run's stored rows live in this process
-    and are released the moment the run ends (`releaseExecutionRun`), so on a finished
-    run every one of these controls could only answer "no longer held". The note in
-    the report section is what explains the absence; applying a drafted statement is
-    unaffected, because the ledger keeps the statement for as long as the timeline.
+    It is offered only while the run is OPEN — queued, running or paused — and that is
+    the same rule the stop control follows rather than a caution: a run's stored rows
+    live in this process and are released the moment the run ends
+    (`releaseExecutionRun`), so on a finished run every one of these controls could only
+    answer "no longer held". A paused run still holds its rows (B83), so the control is
+    still offered. The note in the report section is what explains the absence; applying
+    a drafted statement is unaffected, because the ledger keeps the statement for as long
+    as the timeline.
   */
   const activeRunId = run.runId;
   const showArtifact =
@@ -1784,9 +1778,11 @@ export function AgentRail({
     the other arrangement would have bought.
   */
   useEffect(() => {
-    const live = run.runId === null || LIVE_STATUSES.has(run.timeline.status);
-    timelineLive.current = live;
-    if (live) {
+    // OPEN, not LIVE: a paused run is still following its own end, so it must not
+    // spend the once-per-run answer reveal the way a finished run does.
+    const open = run.runId === null || OPEN_STATUSES.has(run.timeline.status);
+    timelineLive.current = open;
+    if (open) {
       pinToNewest();
       return;
     }

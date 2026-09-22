@@ -1214,6 +1214,24 @@ describe("PATCH /api/agent/runs/[runId]", () => {
     }
   });
 
+  test("a resume that lost the race to the run's end answers it without driving an ended run", async () => {
+    // `unpause` answered a terminal record — another writer ended the run between the
+    // render and the click. That is a normal answer (item 5), not a run to drive:
+    // driving it would resolve a connection and build a provider for a run already over.
+    mockUnpause.mockResolvedValueOnce(fakeRun({ status: "cancelled" }));
+
+    const res = await PATCH(
+      createMockRequest("/api/agent/runs/arun_1", { method: "PATCH", body: { action: "resume" } }),
+      params("arun_1"),
+    );
+    const body = await parseResponseJSON<{ status: string }>(res);
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("cancelled");
+    expect(mockUnpause).toHaveBeenCalledWith("arun_1");
+    expect(mockDriveAgentRun).not.toHaveBeenCalled();
+  });
+
   test("a pause that fails for a reason the service cannot name still answers 500, not 409", async () => {
     mockPause.mockRejectedValueOnce(new Error("ledger corrupted"));
 

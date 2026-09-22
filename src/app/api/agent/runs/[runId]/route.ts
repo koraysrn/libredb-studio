@@ -68,16 +68,22 @@ export async function PATCH(req: Request, { params }: RunParams) {
     if (action === "pause") return NextResponse.json(await access.service.pause(runId));
     if (action === "resume") {
       const record = await access.service.unpause(runId);
-      // Driven in this process, the way the start route drives a fresh run. The
-      // run's durability does not depend on this call surviving: everything it
-      // does is written to the ledger first, and a drive that dies leaves a run
-      // the sweep can still pick up.
-      void driveAgentRun(runId).catch((error: unknown) => {
-        logger.error("Agent run unpause drive ended in failure", error, {
-          route: "PATCH /api/agent/runs/[runId]",
-          runId,
+      // Driven in this process, the way the start route drives a fresh run — but only
+      // when unpause actually answered `running`. A lost race to the run's end answers
+      // a terminal record, and driving an ended run would resolve a connection, build a
+      // provider and leave entries in the process's resource maps for a run that is
+      // already over: that terminal answer is a normal outcome, not a drive to start.
+      // The run's durability does not depend on the drive surviving either: everything
+      // it does is written to the ledger first, and a drive that dies leaves a run the
+      // sweep can still pick up.
+      if (record.status === "running") {
+        void driveAgentRun(runId).catch((error: unknown) => {
+          logger.error("Agent run unpause drive ended in failure", error, {
+            route: "PATCH /api/agent/runs/[runId]",
+            runId,
+          });
         });
-      });
+      }
       return NextResponse.json(record);
     }
     return NextResponse.json({ error: `Unknown action: ${String(action)}` }, { status: 400 });
