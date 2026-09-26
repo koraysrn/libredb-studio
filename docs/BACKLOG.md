@@ -31,7 +31,7 @@ None of it is a GitHub issue.
 - [Drivers and connections](#drivers-and-connections) — D1-D128, U17 · 73
 - [Value interpolation](#value-interpolation) — V1
 - [Row editing](#row-editing) — R1–R3 · 3
-- [Studio UI and query execution](#studio-ui-and-query-execution) — X2-X19, U2-U54 · 42
+- [Studio UI and query execution](#studio-ui-and-query-execution) — X2-X19, U2-U54 · 41
 - [Dependencies](#dependencies) — P1–P5 · 5
 - [Documentation](#documentation) — DOC3–DOC7 · 4
 - [Release pipeline](#release-pipeline) — REL1–REL4 · 4
@@ -2090,25 +2090,6 @@ The fix is a server-side export: a route that streams the statement's full resul
 writers. `csv.ts` and `result-export.ts` are pure and hold no browser reference precisely so a route
 can reuse them; `download.ts` is the only browser-bound module there. Worth costing against the
 agent's own export gap (B33, B34), which wants the same route.
-
-### X5. `Studio.tsx` re-renders its whole tree on every keystroke
-
-14 `useState`, no `useMemo`/`useCallback`, no memoized children, React Compiler off. #422's
-code-splitting is not this fix and does not help it. It touches every prop in the shell, which is why
-it was not mixed into a correctness PR.
-
-Closed for the shell in the X5 PR: the ten children (`Sidebar`, `ConnectionsList`, `SchemaExplorer`,
-`AgentRail`, `AnswerCard`, `QueryToolbar`, `BottomPanel`, `StudioTabBar`, `StudioDesktopHeader`,
-`StudioMobileHeader`) are now `React.memo`, and the shell's inline callbacks (`openTabFor`,
-`onObjectClick`, `objectActions`, `agentRail` and the rest) are `useCallback`/`useMemo` so their
-identities hold across the keystroke re-render. Pinned by
-`tests/components/studio/render-isolation.test.tsx`.
-
-What remains is the sentence below. `framer-motion` is still in the first load: `ConnectionModal`,
-`SchemaExplorer`, `ConnectionItem` and `TableItem` all import it statically and all mount on arrival.
-`Studio.tsx`'s own `AnimatePresence` moved into the lazy `DiagramOverlay`
-(`src/components/DiagramOverlay.tsx`), so the shell itself no longer pulls framer-motion, but the four
-components above still do.
 
 ### X9. What `columnTypes` still cannot name, measured
 

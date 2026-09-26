@@ -749,14 +749,17 @@ describe("Studio", () => {
   // Reached here through the mobile schema tab, which still renders the flat explorer
   // (#789). The desktop sidebar reaches the same handler through the object tree's row
   // menu, which is asserted further down under `objectActions` (U22).
-  function openSchemaTab(): void {
+  // The schema explorer is `React.lazy` (X5), so its props arrive one async tick
+  // after the tab is opened; `waitFor` settles that before the handler is read.
+  async function openSchemaTab(): Promise<void> {
     act(() => (capturedMobileNavProps.onTabChange as (tab: string) => void)("schema"));
+    await waitFor(() => expect(capturedSchemaExplorerProps.onOpenMaintenance).toBeDefined());
   }
 
-  test("openMaintenance navigates to admin operations when admin", () => {
+  test("openMaintenance navigates to admin operations when admin", async () => {
     connMgrOverride = { activeConnection: pgConn };
     render(<Studio />);
-    openSchemaTab();
+    await openSchemaTab();
     const fn = capturedSchemaExplorerProps.onOpenMaintenance as () => void;
     act(() => fn());
     expect(mockRouterPush).toHaveBeenCalledWith("/admin/operations");
@@ -765,20 +768,20 @@ describe("Studio", () => {
   // The Explorer's row items call this with the row's ADDRESS; it rides the admin route's
   // query string, one `path` parameter per segment, so the Operations tab lands on that row
   // (#459) and a segment with a space, a dot or a slash survives the trip (#789).
-  test("openMaintenance carries the named row's address to the operations tab", () => {
+  test("openMaintenance carries the named row's address to the operations tab", async () => {
     connMgrOverride = { activeConnection: pgConn };
     render(<Studio />);
-    openSchemaTab();
+    await openSchemaTab();
     const fn = capturedSchemaExplorerProps.onOpenMaintenance as (tab?: string, path?: readonly string[]) => void;
     act(() => fn("tables", ["sales.2026", "order items"]));
     expect(mockRouterPush).toHaveBeenCalledWith("/admin/operations?path=sales.2026&path=order+items");
   });
 
-  test("openMaintenance navigates to monitoring when not admin", () => {
+  test("openMaintenance navigates to monitoring when not admin", async () => {
     authOverride = { isAdmin: false };
     connMgrOverride = { activeConnection: pgConn };
     render(<Studio />);
-    openSchemaTab();
+    await openSchemaTab();
     const fn = capturedSchemaExplorerProps.onOpenMaintenance as () => void;
     act(() => fn());
     expect(mockRouterPush).toHaveBeenCalledWith("/monitoring");
@@ -1133,11 +1136,11 @@ describe("Studio", () => {
   });
 
   // --- onEditConnection ---
-  test("onEditConnection opens connection modal with connection", () => {
+  test("onEditConnection opens connection modal with connection", async () => {
     render(<Studio />);
     const fn = capturedSidebarProps.onEditConnection as (c: unknown) => void;
     act(() => fn(pgConn));
-    expect(capturedConnectionModalProps.isOpen).toBe(true);
+    await waitFor(() => expect(capturedConnectionModalProps.isOpen).toBe(true));
     expect(capturedConnectionModalProps.editConnection).toEqual(pgConn);
   });
 
@@ -1251,18 +1254,21 @@ describe("Studio", () => {
     },
   );
 
-  test("onAddConnection opens connection modal", () => {
+  test("onAddConnection opens connection modal", async () => {
     render(<Studio />);
     const fn = capturedSidebarProps.onAddConnection as () => void;
     act(() => fn());
-    expect(capturedConnectionModalProps.isOpen).toBe(true);
+    await waitFor(() => expect(capturedConnectionModalProps.isOpen).toBe(true));
   });
 
   // --- ConnectionModal onConnect ---
-  test("ConnectionModal onConnect saves and activates connection", () => {
+  test("ConnectionModal onConnect saves and activates connection", async () => {
     const newConns = [pgConn];
     mockStorageGetConnections.mockReturnValue(newConns);
     render(<Studio />);
+    // Open the modal first: it is `React.lazy`, so it only mounts once asked for.
+    act(() => (capturedSidebarProps.onAddConnection as () => void)());
+    await waitFor(() => expect(capturedConnectionModalProps.onConnect).toBeDefined());
     const onConnect = capturedConnectionModalProps.onConnect as (c: unknown) => void;
     act(() => onConnect(pgConn));
     expect(mockStorageSaveConnection).toHaveBeenCalledWith(pgConn);
@@ -1271,16 +1277,18 @@ describe("Studio", () => {
   });
 
   // --- ConnectionModal onClose ---
-  test("ConnectionModal onClose resets editing and closes modal", () => {
+  test("ConnectionModal onClose resets editing and closes modal", async () => {
     render(<Studio />);
-    // Open the modal
-    const addFn = capturedSidebarProps.onAddConnection as () => void;
-    act(() => addFn());
-    expect(capturedConnectionModalProps.isOpen).toBe(true);
-    // Close the modal
-    const closeFn = capturedConnectionModalProps.onClose as () => void;
-    act(() => closeFn());
-    expect(capturedConnectionModalProps.isOpen).toBe(false);
+    // Open in EDIT mode, so there is an edit to reset.
+    act(() => (capturedSidebarProps.onEditConnection as (c: unknown) => void)(pgConn));
+    await waitFor(() => expect(capturedConnectionModalProps.isOpen).toBe(true));
+    expect(capturedConnectionModalProps.editConnection).toEqual(pgConn);
+    // Close it: this unmounts the lazy modal (isOpen && edit both become false/null).
+    act(() => (capturedConnectionModalProps.onClose as () => void)());
+    // Reopen on a plain add: the edit must have been cleared, so it is not carried over.
+    act(() => (capturedSidebarProps.onAddConnection as () => void)());
+    await waitFor(() => expect(capturedConnectionModalProps.isOpen).toBe(true));
+    expect(capturedConnectionModalProps.editConnection).toBeNull();
   });
 
   // --- exportResults ---

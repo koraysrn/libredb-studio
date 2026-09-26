@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence } from "framer-motion";
 import { ChunkBoundary } from "@/components/LazyView";
 import { SchemaDiagram } from "@/components/SchemaDiagram";
 import type { DetailedObject } from "@/lib/db/detailed-object";
@@ -14,22 +15,27 @@ import type { ProviderCapabilities } from "@/lib/db/types";
  * layout engine, snapdom AND framer-motion reach the browser only once the ERD is
  * first opened.
  *
- * The exit animation `AnimatePresence` provided is deliberately dropped: it is the
- * one behaviour that requires the component (and therefore framer-motion) to stay
- * mounted even while the diagram is closed, which would undo the split. Closing the
- * diagram is now an instant unmount, which the `ChunkBoundary` fallback already
- * covered for the slow-open case.
+ * The shell keeps this component MOUNTED once it has been shown once
+ * (`hasShownDiagram` in `Studio.tsx`), and passes `showDiagram` down, so the
+ * `AnimatePresence` exit animation is preserved: closing the diagram animates it
+ * out instead of unmounting it instantly, while a session that never opens the ERD
+ * never loads framer-motion at all.
  */
 interface DiagramOverlayProps {
+  showDiagram: boolean;
   schema: readonly DetailedObject[];
   capabilities?: ProviderCapabilities;
   onClose: () => void;
 }
 
-export function DiagramOverlay({ schema, capabilities, onClose }: DiagramOverlayProps) {
+export function DiagramOverlay({ showDiagram, schema, capabilities, onClose }: DiagramOverlayProps) {
   return (
-    <ChunkBoundary label="The diagram">
-      <SchemaDiagram schema={schema} capabilities={capabilities} onClose={onClose} />
-    </ChunkBoundary>
+    <AnimatePresence>
+      {showDiagram && (
+        <ChunkBoundary label="The diagram">
+          <SchemaDiagram schema={schema} capabilities={capabilities} onClose={onClose} />
+        </ChunkBoundary>
+      )}
+    </AnimatePresence>
   );
 }

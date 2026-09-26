@@ -9,8 +9,6 @@ import { type TreeRowActionHandlers } from "@/components/object-tree";
 import { objectAtPath } from "@/lib/db/detailed-object";
 import { objectPathLabel, objectPathQuery } from "@/lib/db/object-path";
 import { MobileNav } from "@/components/MobileNav";
-import { SchemaExplorer } from "@/components/schema-explorer";
-import { ConnectionModal } from "@/components/ConnectionModal";
 import { CommandPalette } from "@/components/CommandPalette";
 import { QueryEditor, QueryEditorRef } from "@/components/QueryEditor";
 import { ShortcutsDialog, type ShortcutsDialogRef } from "@/components/ShortcutsDialog";
@@ -100,6 +98,19 @@ import {
 */
 const DiagramOverlay = React.lazy(
   lazyRetry(() => import("@/components/DiagramOverlay").then((m) => ({ default: m.DiagramOverlay }))),
+);
+
+// The connection modal owns `framer-motion` (its expandable fields animate in and out),
+// so it is split out of the shell's first load the same way the diagram is (X5). It is
+// mounted only while a connection modal is actually on screen.
+const ConnectionModal = React.lazy(
+  lazyRetry(() => import("@/components/ConnectionModal").then((m) => ({ default: m.ConnectionModal }))),
+);
+
+// The schema explorer (and its `TableItem`/`ColumnList` children) own `framer-motion`,
+// so it too leaves the first load and is fetched only when the mobile Schema tab opens (X5).
+const SchemaExplorer = React.lazy(
+  lazyRetry(() => import("@/components/schema-explorer").then((m) => ({ default: m.SchemaExplorer }))),
 );
 
 export default function Studio() {
@@ -498,11 +509,18 @@ export default function Studio() {
 
   const handleAddConnection = useCallback(() => setIsConnectionModalOpen(true), []);
 
-  const handleShowDiagram = useCallback(() => setShowDiagram(true), []);
-  const handleHideDiagram = useCallback(() => setShowDiagram(false), []);
   const [pendingDeleteConnectionId, setPendingDeleteConnectionId] = useState<string | null>(null);
   const [isCreateTableModalOpen, setIsCreateTableModalOpen] = useState(false);
   const [showDiagram, setShowDiagram] = useState(false);
+  // Set the FIRST time the diagram is asked for, so the lazy `DiagramOverlay` (and with
+  // it framer-motion) is only loaded once the ERD is actually opened. Once true it stays
+  // true: the overlay stays mounted for `AnimatePresence`'s exit animation.
+  const [hasShownDiagram, setHasShownDiagram] = useState(false);
+  const handleShowDiagram = useCallback(() => {
+    setHasShownDiagram(true);
+    setShowDiagram(true);
+  }, []);
+  const handleHideDiagram = useCallback(() => setShowDiagram(false), []);
   const [isSaveQueryModalOpen, setIsSaveQueryModalOpen] = useState(false);
   const [savedKey, setSavedKey] = useState(0);
   const [activeMobileTab, setActiveMobileTab] = useState<"database" | "schema" | "editor">("editor");
@@ -1105,7 +1123,7 @@ export default function Studio() {
             />
 
             <main className="flex-1 overflow-hidden relative">
-              {showDiagram && (
+              {hasShownDiagram && (
                 /*
                   A visible fallback, not `null`: this is the heaviest chunk in the
                   tree (`@xyflow/react` + elk + snapdom), so the wait is the one the
@@ -1116,6 +1134,7 @@ export default function Studio() {
                   fallback={<ViewLoading label="Loading the diagram" className="absolute inset-0 z-20" />}
                 >
                   <DiagramOverlay
+                    showDiagram={showDiagram}
                     schema={conn.schema}
                     capabilities={metadata?.capabilities}
                     onClose={handleHideDiagram}
@@ -1159,31 +1178,35 @@ export default function Studio() {
               {activeMobileTab === "schema" && (
                 <div className="md:hidden h-full bg-sunken overflow-auto p-4">
                   {conn.activeConnection ? (
-                    <SchemaExplorer
-                      schema={conn.schema}
-                      isLoadingSchema={conn.isLoadingSchema}
-                      schemaError={conn.schemaError}
-                      onTableClick={(path) => {
-                        onTableClick(path);
-                        setActiveMobileTab("editor");
-                      }}
-                      onGenerateSelect={(path) => {
-                        tabMgr.handleGenerateSelect(path);
-                        setActiveMobileTab("editor");
-                      }}
-                      onGenerateCount={(path) => {
-                        tabMgr.handleGenerateCount(path);
-                        setActiveMobileTab("editor");
-                      }}
-                      onCreateTableClick={() => setIsCreateTableModalOpen(true)}
-                      isAdmin={isAdmin}
-                      onOpenMaintenance={openMaintenance}
-                      databaseType={conn.activeConnection?.type}
-                      metadata={metadata}
-                      onProfileTable={(path) => setProfilerPath(path)}
-                      onGenerateCode={(path) => setCodeGenPath(path)}
-                      onGenerateTestData={(path) => setTestDataPath(path)}
-                    />
+                    <React.Suspense
+                      fallback={<ViewLoading label="Loading the schema" className="absolute inset-0 z-20" />}
+                    >
+                      <SchemaExplorer
+                        schema={conn.schema}
+                        isLoadingSchema={conn.isLoadingSchema}
+                        schemaError={conn.schemaError}
+                        onTableClick={(path) => {
+                          onTableClick(path);
+                          setActiveMobileTab("editor");
+                        }}
+                        onGenerateSelect={(path) => {
+                          tabMgr.handleGenerateSelect(path);
+                          setActiveMobileTab("editor");
+                        }}
+                        onGenerateCount={(path) => {
+                          tabMgr.handleGenerateCount(path);
+                          setActiveMobileTab("editor");
+                        }}
+                        onCreateTableClick={() => setIsCreateTableModalOpen(true)}
+                        isAdmin={isAdmin}
+                        onOpenMaintenance={openMaintenance}
+                        databaseType={conn.activeConnection?.type}
+                        metadata={metadata}
+                        onProfileTable={(path) => setProfilerPath(path)}
+                        onGenerateCode={(path) => setCodeGenPath(path)}
+                        onGenerateTestData={(path) => setTestDataPath(path)}
+                      />
+                    </React.Suspense>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full text-fg-muted">
                       <Database strokeWidth={1.5} className="w-12 h-12 mb-4 opacity-30" />
@@ -1403,23 +1426,29 @@ export default function Studio() {
       {agentEnabled && isMobile && agentRail}
 
       {/* Modals */}
-      <ConnectionModal
-        isOpen={isConnectionModalOpen}
-        onClose={() => {
-          setIsConnectionModalOpen(false);
-          setEditingConnection(null);
-        }}
-        onConnect={(c) => {
-          storage.saveConnection(c);
-          const userConns = storage.getConnections();
-          const managedConns = conn.connections.filter((mc) => mc.managed && !userConns.some((uc) => uc.id === mc.id));
-          conn.setConnections([...managedConns, ...userConns]);
-          conn.setActiveConnection(c);
-          setIsConnectionModalOpen(false);
-          setEditingConnection(null);
-        }}
-        editConnection={editingConnection}
-      />
+      {(isConnectionModalOpen || editingConnection !== null) && (
+        <React.Suspense fallback={null}>
+          <ConnectionModal
+            isOpen={isConnectionModalOpen}
+            onClose={() => {
+              setIsConnectionModalOpen(false);
+              setEditingConnection(null);
+            }}
+            onConnect={(c) => {
+              storage.saveConnection(c);
+              const userConns = storage.getConnections();
+              const managedConns = conn.connections.filter(
+                (mc) => mc.managed && !userConns.some((uc) => uc.id === mc.id),
+              );
+              conn.setConnections([...managedConns, ...userConns]);
+              conn.setActiveConnection(c);
+              setIsConnectionModalOpen(false);
+              setEditingConnection(null);
+            }}
+            editConnection={editingConnection}
+          />
+        </React.Suspense>
+      )}
       <CreateTableModal
         isOpen={isCreateTableModalOpen}
         onClose={() => setIsCreateTableModalOpen(false)}
@@ -1573,7 +1602,7 @@ export default function Studio() {
         }}
         onNavigateHealth={() => router.push("/monitoring")}
         onNavigateMonitoring={() => router.push("/monitoring")}
-        onShowDiagram={() => setShowDiagram(true)}
+        onShowDiagram={handleShowDiagram}
         onFormatQuery={() => queryEditorRef.current?.format()}
         onSaveQuery={() => setIsSaveQueryModalOpen(true)}
         onAskAgent={agentEnabled ? askAgentAboutStatement : undefined}
