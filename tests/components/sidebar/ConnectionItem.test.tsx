@@ -97,6 +97,30 @@ describe("ConnectionItem", () => {
     expect(queryByText("Test PostgreSQL")).not.toBeNull();
   });
 
+  test("activating the row with Enter or Space selects the connection", () => {
+    const { container } = render(
+      <ConnectionItem
+        connection={mockPostgresConnection}
+        isActive={false}
+        onSelect={defaultOnSelect}
+        onDelete={defaultOnDelete}
+      />,
+    );
+
+    const row = container.querySelector('[role="button"]');
+    expect(row).not.toBeNull();
+
+    fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
+    expect(defaultOnSelect).toHaveBeenCalledWith(mockPostgresConnection);
+
+    fireEvent.keyDown(row as HTMLElement, { key: " " });
+    expect(defaultOnSelect).toHaveBeenCalledTimes(2);
+
+    // Any other key does not select, so the keyboard handler is not a catch-all.
+    fireEvent.keyDown(row as HTMLElement, { key: "a" });
+    expect(defaultOnSelect).toHaveBeenCalledTimes(2);
+  });
+
   test("shows environment badge for non-other environments", () => {
     // mockPostgresConnection has environment: 'development' => ENVIRONMENT_LABELS['development'] = 'DEV'
     const { queryByText } = render(

@@ -2,7 +2,7 @@ import "../../setup-dom";
 import "../../helpers/mock-sonner";
 
 import React, { useState } from "react";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import { Sidebar } from "@/components/sidebar";
@@ -65,9 +65,12 @@ describe("memoized children skip re-renders on unchanged props", () => {
   afterEach(cleanup);
 
   test("React.memo bails out on unchanged props (the mechanism every child above relies on)", () => {
-    let renders = 0;
+    // A render spy rather than a mutable counter: `mock` records how many times the
+    // child's render function actually ran, which is the behavioural half of the memo
+    // guarantee (the `$$typeof` check above is only the structural half).
+    const renderSpy = mock(() => {});
     const Child = React.memo(function Child({ label }: { label: string }) {
-      renders += 1;
+      renderSpy();
       return <div>{label}</div>;
     });
 
@@ -84,10 +87,10 @@ describe("memoized children skip re-renders on unchanged props", () => {
     }
 
     const { getByTestId } = render(<Harness />);
-    expect(renders).toBe(1);
+    expect(renderSpy).toHaveBeenCalledTimes(1);
     fireEvent.click(getByTestId("tick"));
     fireEvent.click(getByTestId("tick"));
     // The child's props never changed, so memo skipped both parent re-renders.
-    expect(renders).toBe(1);
+    expect(renderSpy).toHaveBeenCalledTimes(1);
   });
 });
