@@ -2097,8 +2097,18 @@ agent's own export gap (B33, B34), which wants the same route.
 code-splitting is not this fix and does not help it. It touches every prop in the shell, which is why
 it was not mixed into a correctness PR.
 
-`framer-motion` is also still in the first load: `Studio.tsx`, `ConnectionModal`, `SchemaExplorer`,
-`ConnectionItem` and `TableItem` all import it statically and all mount on arrival.
+Closed for the shell in the X5 PR: the ten children (`Sidebar`, `ConnectionsList`, `SchemaExplorer`,
+`AgentRail`, `AnswerCard`, `QueryToolbar`, `BottomPanel`, `StudioTabBar`, `StudioDesktopHeader`,
+`StudioMobileHeader`) are now `React.memo`, and the shell's inline callbacks (`openTabFor`,
+`onObjectClick`, `objectActions`, `agentRail` and the rest) are `useCallback`/`useMemo` so their
+identities hold across the keystroke re-render. Pinned by
+`tests/components/studio/render-isolation.test.tsx`.
+
+What remains is the sentence below. `framer-motion` is still in the first load: `ConnectionModal`,
+`SchemaExplorer`, `ConnectionItem` and `TableItem` all import it statically and all mount on arrival.
+`Studio.tsx`'s own `AnimatePresence` moved into the lazy `DiagramOverlay`
+(`src/components/DiagramOverlay.tsx`), so the shell itself no longer pulls framer-motion, but the four
+components above still do.
 
 ### X9. What `columnTypes` still cannot name, measured
 
