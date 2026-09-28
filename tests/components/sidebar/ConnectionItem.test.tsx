@@ -121,6 +121,25 @@ describe("ConnectionItem", () => {
     expect(defaultOnSelect).toHaveBeenCalledTimes(2);
   });
 
+  // The row's buttons sit inside it, so their keydowns bubble to the row. Handling those
+  // cancelled the button's own activation: Enter on Edit selected the connection instead.
+  test.each(["Enter", " "])("%p on a button inside the row is left to that button", (key) => {
+    const { getByRole } = render(
+      <ConnectionItem
+        connection={mockPostgresConnection}
+        isActive={false}
+        onSelect={defaultOnSelect}
+        onDelete={defaultOnDelete}
+        onEdit={defaultOnEdit}
+      />,
+    );
+
+    // `fireEvent` answers false when a handler called preventDefault.
+    expect(fireEvent.keyDown(getByRole("button", { name: "Edit connection" }), { key })).toBe(true);
+    expect(fireEvent.keyDown(getByRole("button", { name: "Delete connection" }), { key })).toBe(true);
+    expect(defaultOnSelect).not.toHaveBeenCalled();
+  });
+
   test("shows environment badge for non-other environments", () => {
     // mockPostgresConnection has environment: 'development' => ENVIRONMENT_LABELS['development'] = 'DEV'
     const { queryByText } = render(

@@ -1,9 +1,7 @@
 import "../../setup-dom";
 import "../../helpers/mock-sonner";
 
-import React, { useState } from "react";
-import { afterEach, describe, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { describe, expect, test } from "bun:test";
 
 import { Sidebar } from "@/components/sidebar";
 import { ConnectionsList } from "@/components/sidebar/ConnectionsList";
@@ -27,13 +25,11 @@ import { StudioTabBar } from "@/components/studio/StudioTabBar";
  * `Symbol.for("react.memo")` — the same marker React itself reads to decide a bail-out —
  * so this is the state that makes the optimisation real, not a symptom of one.
  *
- * The behavioural half — that `Studio.tsx` hands these children STABLE callback
- * identities — is covered by `tests/components/Studio.test.tsx`, which renders the real
- * shell and drives its handlers; a memo wrapper is only effective when the props it
- * compares keep their identity, and the shell's `useCallback`/`useMemo` rewrites are
- * what provide that. Removing the `React.memo` wrapper from any child makes its entry
- * below fail, and removing a `useCallback` from the shell fails the lint rule that
- * `bun run lint` enforces.
+ * The behavioural half, that a keystroke hands the sidebar, the agent rail and the
+ * toolbar the props they already had, is pinned in `tests/components/Studio.test.tsx`
+ * ("a keystroke hands the sidebar, the rail and the toolbar the props they already had"):
+ * a memo wrapper bails out only while every prop it compares keeps its identity. Removing
+ * the `React.memo` wrapper from any child makes its entry below fail.
  */
 
 const REACT_MEMO = Symbol.for("react.memo");
@@ -58,39 +54,5 @@ describe("studio children are wrapped in React.memo (X5)", () => {
     ["StudioTabBar", StudioTabBar],
   ])("%s is memoized", (_name, component) => {
     expect(isMemoized(component)).toBe(true);
-  });
-});
-
-describe("memoized children skip re-renders on unchanged props", () => {
-  afterEach(cleanup);
-
-  test("React.memo bails out on unchanged props (the mechanism every child above relies on)", () => {
-    // A render spy rather than a mutable counter: `mock` records how many times the
-    // child's render function actually ran, which is the behavioural half of the memo
-    // guarantee (the `$$typeof` check above is only the structural half).
-    const renderSpy = mock(() => {});
-    const Child = React.memo(function Child({ label }: { label: string }) {
-      renderSpy();
-      return <div>{label}</div>;
-    });
-
-    function Harness() {
-      const [tick, setTick] = useState(0);
-      return (
-        <div>
-          <button type="button" data-testid="tick" onClick={() => setTick((t) => t + 1)}>
-            tick
-          </button>
-          <Child label="stable" />
-        </div>
-      );
-    }
-
-    const { getByTestId } = render(<Harness />);
-    expect(renderSpy).toHaveBeenCalledTimes(1);
-    fireEvent.click(getByTestId("tick"));
-    fireEvent.click(getByTestId("tick"));
-    // The child's props never changed, so memo skipped both parent re-renders.
-    expect(renderSpy).toHaveBeenCalledTimes(1);
   });
 });

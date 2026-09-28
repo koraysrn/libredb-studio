@@ -99,6 +99,9 @@ let authOverride: Record<string, unknown> = {};
 let editingOverride: Record<string, unknown> = {};
 let capabilitiesOverride: Record<string, unknown> = {};
 let metadataOverride: Record<string, unknown> = {};
+// The split views whose stub throws on render (X5). A throw from the lazy component lands
+// where a rejected import does, at the lazy element, so it reaches the same boundary.
+const failingSplitViews = new Set<"diagram" | "connection-dialog" | "schema-explorer">();
 
 // ---- Mock all hooks ----
 
@@ -297,6 +300,7 @@ mock.module("@/components/schema-explorer", () => {
   const React = require("react");
   return {
     SchemaExplorer: (props: Record<string, unknown>) => {
+      if (failingSplitViews.has("schema-explorer")) throw new Error("Loading chunk 9 failed");
       capturedSchemaExplorerProps = props;
       return React.createElement("div", { "data-testid": "schema-explorer" }, "SchemaExplorer");
     },
@@ -305,6 +309,7 @@ mock.module("@/components/schema-explorer", () => {
 
 mock.module("@/components/ConnectionModal", () => ({
   ConnectionModal: (props: Record<string, unknown>) => {
+    if (failingSplitViews.has("connection-dialog")) throw new Error("Loading chunk 8 failed");
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const React = require("react");
     capturedConnectionModalProps = props;
@@ -359,6 +364,7 @@ mock.module("@/components/CommandPalette", () => ({
 
 mock.module("@/components/SchemaDiagram", () => ({
   SchemaDiagram: () => {
+    if (failingSplitViews.has("diagram")) throw new Error("Loading chunk 7 failed");
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const React = require("react");
     return React.createElement("div", { "data-testid": "schemadiagram" }, "SchemaDiagram");
@@ -553,6 +559,7 @@ describe("Studio", () => {
     editingOverride = {};
     capabilitiesOverride = {};
     metadataOverride = {};
+    failingSplitViews.clear();
 
     // Clear trackable mocks
     mockHandleLogout.mockClear();
@@ -2049,6 +2056,45 @@ describe("Studio", () => {
     expect(queryByTestId("schemadiagram")).not.toBeNull();
   });
 
+  // A split view whose chunk never arrives must not take the shell down with it (X5).
+  describe("a split view that cannot be loaded", () => {
+    test("the diagram says so in place, and Close takes it away", async () => {
+      failingSplitViews.add("diagram");
+      const { findByText, getByText, getByTestId, queryByTestId } = render(<Studio />);
+      await act(async () => (capturedSidebarProps.onShowDiagram as () => void)());
+
+      expect(await findByText("The diagram could not be loaded.")).toBeTruthy();
+      expect(getByTestId("sidebar")).toBeTruthy();
+      expect(getByTestId("query-editor")).toBeTruthy();
+
+      fireEvent.click(getByText("Close"));
+      expect(queryByTestId("chunk-error")).toBeNull();
+    });
+
+    test("the connection dialog says so over the shell, and Close takes it away", async () => {
+      failingSplitViews.add("connection-dialog");
+      const { findByText, getByText, getByTestId, queryByTestId } = render(<Studio />);
+      act(() => (capturedSidebarProps.onAddConnection as () => void)());
+
+      expect(await findByText("The connection dialog could not be loaded.")).toBeTruthy();
+      expect(getByTestId("chunk-error").className).toContain("fixed");
+      expect(getByTestId("sidebar")).toBeTruthy();
+
+      fireEvent.click(getByText("Close"));
+      expect(queryByTestId("chunk-error")).toBeNull();
+    });
+
+    test("the schema explorer says so inside its tab", async () => {
+      failingSplitViews.add("schema-explorer");
+      connMgrOverride = { activeConnection: pgConn };
+      const { findByText, getByTestId } = render(<Studio />);
+      act(() => (capturedMobileNavProps.onTabChange as (tab: string) => void)("schema"));
+
+      expect(await findByText("The schema explorer could not be loaded.")).toBeTruthy();
+      expect(getByTestId("sidebar")).toBeTruthy();
+    });
+  });
+
   // --- MobileHeader callbacks ---
   test("MobileHeader onSaveQuery opens save modal", () => {
     const { queryByTestId } = render(<Studio />);
@@ -2513,6 +2559,59 @@ describe("Studio", () => {
 
     expect(mockUpdateCurrentTab).toHaveBeenCalledWith({ query: "SELECT 2" });
     expect(mockExecuteHandedOverStatement).not.toHaveBeenCalled();
+  });
+
+  /**
+   * X5: a keystroke writes the tab and nothing else, so a memoized child that does not
+   * show the query must not be handed a new prop because of it. The hooks are stubbed
+   * here, so the stub does what the real ones do on a keystroke: new `tabs` and
+   * `currentTab`, and a new identity for each hook function whose dependencies include
+   * the tabs (`handleTableClick`, `openSourceTab`, `closeTab`,
+   * `executeHandedOverStatement`, `handleLoadMore`).
+   */
+  test("a keystroke hands the sidebar, the rail and the toolbar the props they already had", async () => {
+    mockAgentConfig(true);
+    // `servedSeeds` is state in the real hook; the stub would mint one per call.
+    connMgrOverride = {
+      activeConnection: managedConn,
+      connections: [managedConn],
+      servedSeeds: { loaded: true, seeds: [] },
+    };
+    const typed = (query: string) => {
+      const tab = { id: "tab-1", name: "Query 1", query, result: null, isExecuting: false, type: "sql" };
+      tabMgrOverride = {
+        tabs: [tab],
+        currentTab: tab,
+        handleTableClick: (...args: unknown[]) => (mockHandleTableClick as (...a: unknown[]) => void)(...args),
+        openSourceTab: () => {},
+        closeTab: () => {},
+      };
+      queryExecOverride = {
+        executeHandedOverStatement: (...args: unknown[]) =>
+          (mockExecuteHandedOverStatement as (...a: unknown[]) => void)(...args),
+        handleLoadMore: () => {},
+      };
+    };
+    const changed = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+      Object.keys({ ...a, ...b }).filter((key) => !Object.is(a[key], b[key]));
+
+    typed("SELECT 1");
+    const { findByTestId, rerender } = render(<Studio />);
+    await findByTestId("agent-rail");
+    const sidebar = { ...capturedSidebarProps };
+    const rail = { ...capturedAgentRailProps };
+    const toolbar = { ...capturedQueryToolbarProps };
+
+    typed("SELECT 12");
+    // The real hook holds metadata in state; this stub mints a new object per call.
+    metadataOverride = { metadata: sidebar.metadata };
+    rerender(<Studio />);
+
+    // The control: the shell did re-render with the new text.
+    expect(capturedQueryEditorProps.value).toBe("SELECT 12");
+    expect(changed(sidebar, capturedSidebarProps)).toEqual([]);
+    expect(changed(rail, capturedAgentRailProps)).toEqual([]);
+    expect(changed(toolbar, capturedQueryToolbarProps)).toEqual([]);
   });
 
   test("below md the mobile nav opens the rail as a sheet", async () => {

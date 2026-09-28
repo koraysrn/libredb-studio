@@ -75,6 +75,9 @@ export const ConnectionItem = React.memo(function ConnectionItem({
       )}
       onClick={() => onSelect(conn)}
       onKeyDown={(e) => {
+        // Only the row's own keys: a keydown bubbling up from one of the buttons below
+        // belongs to that button, and preventDefault here would cancel its activation.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect(conn);

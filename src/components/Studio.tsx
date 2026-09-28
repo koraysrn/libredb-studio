@@ -31,8 +31,9 @@ import { DatabaseConnection, type ColumnSchema, SavedQuery } from "@/lib/types";
 import type { DatabaseObject } from "@/lib/db/types";
 import { findKind, kindHasSource, relationKindIds } from "@/lib/db/object-kinds";
 import { httpSourceApplier, ObjectSourceView, type ObjectSourcePatch } from "@/components/object-source";
-import { ViewLoading } from "@/components/LazyView";
+import { ChunkBoundary, ViewLoading } from "@/components/LazyView";
 import { lazyRetry } from "@/lib/lazy";
+import { useStableCallback } from "@/hooks/use-stable-callback";
 import { editorLanguageForTabType, resolveTabType } from "@/lib/editor/tab-language";
 import {
   buildResultExport,
@@ -92,12 +93,11 @@ import {
   true, which for most sessions is never. `React.lazy`, not `next/dynamic`, to keep the
   same seam the bottom panel uses; the diagram is reached from the embeddable shell too.
 
-  Wrapped in `DiagramOverlay` rather than imported here (X5): that component is what
-  carries the diagram AND `AnimatePresence` (framer-motion), so framer-motion no longer
-  sits in the shell's first-load bundle. See `src/components/DiagramOverlay.tsx`.
+  No `AnimatePresence` around it (X5): the diagram declares an entrance and no exit, so
+  the wrapper animated nothing and only kept framer-motion in the shell's first load.
 */
-const DiagramOverlay = React.lazy(
-  lazyRetry(() => import("@/components/DiagramOverlay").then((m) => ({ default: m.DiagramOverlay }))),
+const SchemaDiagram = React.lazy(
+  lazyRetry(() => import("@/components/SchemaDiagram").then((m) => ({ default: m.SchemaDiagram }))),
 );
 
 // The connection modal owns `framer-motion` (its expandable fields animate in and out),
@@ -417,6 +417,9 @@ export default function Studio() {
     onObjectsChanged: objectsChanged,
     queryEditorRef,
   });
+  const { executeQuery, cancelQuery } = queryExec;
+  const runEditorQuery = useCallback(() => executeQuery(), [executeQuery]);
+  const cancelEditorQuery = useCallback(() => cancelQuery(), [cancelQuery]);
 
   // 6. Inline Editing
   const editing = useInlineEditing({
@@ -432,10 +435,11 @@ export default function Studio() {
   // only error is the defect this gate exists to fix.
   const canEditRows = metadata?.capabilities.supportsInlineRowEdit === true;
   const editingEnabled = canEditRows && editing.editingEnabled;
+  const { editingEnabled: rowEditingOn, setEditingEnabled, handleDiscardChanges } = editing;
   const handleToggleEditing = useCallback(() => {
-    editing.setEditingEnabled(!editing.editingEnabled);
-    if (editing.editingEnabled) editing.handleDiscardChanges();
-  }, [editing.editingEnabled, editing.setEditingEnabled, editing.handleDiscardChanges]);
+    setEditingEnabled(!rowEditingOn);
+    if (rowEditingOn) handleDiscardChanges();
+  }, [rowEditingOn, setEditingEnabled, handleDiscardChanges]);
   const onToggleEditing = canEditRows ? handleToggleEditing : undefined;
 
   // The transaction trio and the sandbox toggle are offered only where the provider
@@ -451,17 +455,18 @@ export default function Studio() {
   // and because QueryToolbar's contract is that the three arrive together or not at
   // all.
   const canRunTransactions = metadata?.capabilities.supportsTransactions === true;
+  const { handleTransaction, setPlaygroundMode, playgroundMode } = txn;
   const transactionHandlers = useMemo(
     () =>
       canRunTransactions
         ? {
-            onBeginTransaction: () => txn.handleTransaction("begin"),
-            onCommitTransaction: () => txn.handleTransaction("commit"),
-            onRollbackTransaction: () => txn.handleTransaction("rollback"),
-            onTogglePlayground: () => txn.setPlaygroundMode(!txn.playgroundMode),
+            onBeginTransaction: () => handleTransaction("begin"),
+            onCommitTransaction: () => handleTransaction("commit"),
+            onRollbackTransaction: () => handleTransaction("rollback"),
+            onTogglePlayground: () => setPlaygroundMode(!playgroundMode),
           }
         : {},
-    [canRunTransactions, txn.handleTransaction, txn.setPlaygroundMode, txn.playgroundMode],
+    [canRunTransactions, handleTransaction, setPlaygroundMode, playgroundMode],
   );
 
   // === Cross-hook orchestration: connection-change effect ===
@@ -508,25 +513,24 @@ export default function Studio() {
   }, []);
 
   const handleAddConnection = useCallback(() => setIsConnectionModalOpen(true), []);
+  const closeConnectionModal = useCallback(() => {
+    setIsConnectionModalOpen(false);
+    setEditingConnection(null);
+  }, []);
 
   const [pendingDeleteConnectionId, setPendingDeleteConnectionId] = useState<string | null>(null);
   const [isCreateTableModalOpen, setIsCreateTableModalOpen] = useState(false);
   const [showDiagram, setShowDiagram] = useState(false);
-  // Set the FIRST time the diagram is asked for, so the lazy `DiagramOverlay` (and with
-  // it framer-motion) is only loaded once the ERD is actually opened. Once true it stays
-  // true: the overlay stays mounted for `AnimatePresence`'s exit animation.
-  const [hasShownDiagram, setHasShownDiagram] = useState(false);
-  const handleShowDiagram = useCallback(() => {
-    setHasShownDiagram(true);
-    setShowDiagram(true);
-  }, []);
+  const handleShowDiagram = useCallback(() => setShowDiagram(true), []);
   const handleHideDiagram = useCallback(() => setShowDiagram(false), []);
   const [isSaveQueryModalOpen, setIsSaveQueryModalOpen] = useState(false);
+  const openSaveQuery = useCallback(() => setIsSaveQueryModalOpen(true), []);
   const [savedKey, setSavedKey] = useState(0);
   const [activeMobileTab, setActiveMobileTab] = useState<"database" | "schema" | "editor">("editor");
   /** What the panel group may hold: below the breakpoint, only the body panel. */
   const isMobile = useIsMobile();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const openImport = useCallback(() => setIsImportModalOpen(true), []);
   // The three modal targets are ADDRESSES, not labels (#789, Task 35). A label is not
   // unique - two containers hold one `customers` on the SQL Server this was measured on -
   // so a target spelled as a name opened whichever object the flat list held first.
@@ -596,8 +600,14 @@ export default function Studio() {
   // to the SAME database has an id that survives that, which is why anything else
   // reaches the rail as null: the rail says why instead of posting a request the route
   // could only refuse — or, worse, accept while meaning a different database.
-  const agentConnectionId =
-    conn.activeConnection === null ? null : resolveAgentRunConnectionId(conn.activeConnection, conn.servedSeeds);
+  //
+  // Memoized because the resolver answers a new object on every call, and the rail is
+  // memoized: a fresh one per keystroke re-rendered the whole rail (X5).
+  const agentConnectionId = useMemo(
+    () =>
+      conn.activeConnection === null ? null : resolveAgentRunConnectionId(conn.activeConnection, conn.servedSeeds),
+    [conn.activeConnection, conn.servedSeeds],
+  );
 
   /*
     What the two standalone AI entry points do now (#331 T3). The in-editor chat is
@@ -640,14 +650,15 @@ export default function Studio() {
     written on the user's behalf. Raised in review on #351, where "verbatim" read as a
     promise this makes about bytes rather than about authorship.
   */
+  const { requestPrefill } = agentPrefill;
   const askAgentAboutStatement = useCallback(() => {
     const statement = tabMgr.currentTab.query.trim();
     if (statement.length === 0) {
       if (isMobileViewport()) setIsAgentSheetOpen(true);
       return;
     }
-    agentPrefill.requestPrefill("investigation", statement);
-  }, [tabMgr.currentTab.query, agentPrefill.requestPrefill]);
+    requestPrefill("investigation", statement);
+  }, [tabMgr.currentTab.query, requestPrefill]);
 
   // Data Masking
   const [maskingConfig, setMaskingConfig] = useState<MaskingConfig>(() => loadMaskingConfig());
@@ -804,8 +815,12 @@ export default function Studio() {
    * gesture that arrives here: `handleTableClick` focuses a tab already open for the same object in
    * the same database while its statement is unedited, rather than opening a second and reading the
    * same rows again.
+   *
+   * STABLE, and read at call time (X5): `handleTableClick` depends on the tabs, so it is a new
+   * function after every keystroke, and every handler below that reaches the memoized sidebar
+   * comes through here.
    */
-  const openTabFor = useCallback(
+  const openTabFor = useStableCallback(
     (path: readonly string[], columns?: readonly ColumnSchema[], database?: number | null) => {
       if (applyInFlight) {
         refuseWhileApplying();
@@ -824,8 +839,11 @@ export default function Studio() {
       // already sends for a key no page carried.
       tabMgr.handleTableClick(path, queryExec.executeQuery, columns ?? [], databaseOverride);
     },
-    [applyInFlight, refuseWhileApplying, tabMgr.handleTableClick, queryExec.executeQuery],
   );
+
+  // A Source tab opener with one identity, for the same reason: `openSourceTab` depends on the tabs.
+  const openSourceTab = useStableCallback((object: DatabaseObject) => tabMgr.openSourceTab(object));
+  const { handleGenerateSelect, handleGenerateCount } = tabMgr;
 
   /** Open and run the statement for one object, addressed by its PATH (#789). See `openTabFor`. */
   const onTableClick = useCallback((path: readonly string[]) => openTabFor(path), [openTabFor]);
@@ -892,9 +910,9 @@ export default function Studio() {
        *
        * The gate is the DECLARATION and never the kind id, exactly as the branch above is.
        */
-      if (kindHasSource(metadata.capabilities, object.kind)) tabMgr.openSourceTab(object);
+      if (kindHasSource(metadata.capabilities, object.kind)) openSourceTab(object);
     },
-    [metadata, onTableClick, tabMgr.openSourceTab],
+    [metadata, onTableClick, openSourceTab],
   );
 
   /**
@@ -917,16 +935,16 @@ export default function Studio() {
    */
   const objectActions = useMemo<TreeRowActionHandlers>(
     () => ({
-      onGenerateSelect: (object) => tabMgr.handleGenerateSelect(object.path),
-      onGenerateCount: (object) => tabMgr.handleGenerateCount(object.path),
+      onGenerateSelect: (object) => handleGenerateSelect(object.path),
+      onGenerateCount: (object) => handleGenerateCount(object.path),
       onProfileObject: (object) => setProfilerPath(object.path),
       onGenerateCode: (object) => setCodeGenPath(object.path),
       onGenerateTestData: (object) => setTestDataPath(object.path),
       onOpenMaintenance: isAdmin ? (object) => openMaintenance("tables", object.path) : undefined,
       onCreateObject: () => setIsCreateTableModalOpen(true),
-      onViewSource: (object) => tabMgr.openSourceTab(object),
+      onViewSource: openSourceTab,
     }),
-    [tabMgr.handleGenerateSelect, tabMgr.handleGenerateCount, tabMgr.openSourceTab, isAdmin, openMaintenance],
+    [handleGenerateSelect, handleGenerateCount, openSourceTab, isAdmin, openMaintenance],
   );
 
   const requestDeleteConnection = useCallback((id: string) => {
@@ -962,22 +980,22 @@ export default function Studio() {
    * One rail, two mounts: a panel of the group above the breakpoint, a bare child of
    * the shell below it. Declared once so the two placements cannot drift apart.
    */
+  const { updateCurrentTab } = tabMgr;
   const handleApplyStatement = useCallback(
     (sql: string) => {
       if (!runsTheActiveTab) return;
-      tabMgr.updateCurrentTab({ query: sql });
+      updateCurrentTab({ query: sql });
     },
-    [runsTheActiveTab, tabMgr.updateCurrentTab],
+    [runsTheActiveTab, updateCurrentTab],
   );
 
-  const handleRunStatement = useCallback(
-    (sql: string, runId: string) => {
-      if (!runsTheActiveTab) return;
-      tabMgr.updateCurrentTab({ query: sql });
-      void queryExec.executeHandedOverStatement(runId, sql);
-    },
-    [runsTheActiveTab, tabMgr.updateCurrentTab, queryExec.executeHandedOverStatement],
-  );
+  // Stable: `executeHandedOverStatement` depends on the tabs (X5). The rail calls this from
+  // its hand-over effect, which `useStableCallback` keeps current for.
+  const handleRunStatement = useStableCallback((sql: string, runId: string) => {
+    if (!runsTheActiveTab) return;
+    updateCurrentTab({ query: sql });
+    void queryExec.executeHandedOverStatement(runId, sql);
+  });
 
   const agentRail = useMemo(
     () => (
@@ -1128,23 +1146,26 @@ export default function Studio() {
             />
 
             <main className="flex-1 overflow-hidden relative">
-              {hasShownDiagram && (
+              {showDiagram && (
                 /*
                   A visible fallback, not `null`: this is the heaviest chunk in the
                   tree (`@xyflow/react` + elk + snapdom), so the wait is the one the
                   user is most likely to see — and a click that shows nothing at all
                   reads as a broken button, which is answered by clicking it again.
+                  The boundary sits ABOVE the lazy element, which is where a chunk that
+                  never arrives throws; below it, the failure reaches the app's error page.
                 */
-                <React.Suspense
-                  fallback={<ViewLoading label="Loading the diagram" className="absolute inset-0 z-20" />}
-                >
-                  <DiagramOverlay
-                    showDiagram={showDiagram}
-                    schema={conn.schema}
-                    capabilities={metadata?.capabilities}
-                    onClose={handleHideDiagram}
-                  />
-                </React.Suspense>
+                <ChunkBoundary label="The diagram" className="absolute inset-0 z-20" onDismiss={handleHideDiagram}>
+                  <React.Suspense
+                    fallback={<ViewLoading label="Loading the diagram" className="absolute inset-0 z-20" />}
+                  >
+                    <SchemaDiagram
+                      schema={conn.schema}
+                      capabilities={metadata?.capabilities}
+                      onClose={handleHideDiagram}
+                    />
+                  </React.Suspense>
+                </ChunkBoundary>
               )}
 
               {/* Mobile: Database Tab */}
@@ -1183,35 +1204,37 @@ export default function Studio() {
               {activeMobileTab === "schema" && (
                 <div className="md:hidden h-full bg-sunken overflow-auto p-4">
                   {conn.activeConnection ? (
-                    <React.Suspense
-                      fallback={<ViewLoading label="Loading the schema" className="absolute inset-0 z-20" />}
-                    >
-                      <SchemaExplorer
-                        schema={conn.schema}
-                        isLoadingSchema={conn.isLoadingSchema}
-                        schemaError={conn.schemaError}
-                        onTableClick={(path) => {
-                          onTableClick(path);
-                          setActiveMobileTab("editor");
-                        }}
-                        onGenerateSelect={(path) => {
-                          tabMgr.handleGenerateSelect(path);
-                          setActiveMobileTab("editor");
-                        }}
-                        onGenerateCount={(path) => {
-                          tabMgr.handleGenerateCount(path);
-                          setActiveMobileTab("editor");
-                        }}
-                        onCreateTableClick={() => setIsCreateTableModalOpen(true)}
-                        isAdmin={isAdmin}
-                        onOpenMaintenance={openMaintenance}
-                        databaseType={conn.activeConnection?.type}
-                        metadata={metadata}
-                        onProfileTable={(path) => setProfilerPath(path)}
-                        onGenerateCode={(path) => setCodeGenPath(path)}
-                        onGenerateTestData={(path) => setTestDataPath(path)}
-                      />
-                    </React.Suspense>
+                    <ChunkBoundary label="The schema explorer">
+                      <React.Suspense
+                        fallback={<ViewLoading label="Loading the schema" className="absolute inset-0 z-20" />}
+                      >
+                        <SchemaExplorer
+                          schema={conn.schema}
+                          isLoadingSchema={conn.isLoadingSchema}
+                          schemaError={conn.schemaError}
+                          onTableClick={(path) => {
+                            onTableClick(path);
+                            setActiveMobileTab("editor");
+                          }}
+                          onGenerateSelect={(path) => {
+                            tabMgr.handleGenerateSelect(path);
+                            setActiveMobileTab("editor");
+                          }}
+                          onGenerateCount={(path) => {
+                            tabMgr.handleGenerateCount(path);
+                            setActiveMobileTab("editor");
+                          }}
+                          onCreateTableClick={() => setIsCreateTableModalOpen(true)}
+                          isAdmin={isAdmin}
+                          onOpenMaintenance={openMaintenance}
+                          databaseType={conn.activeConnection?.type}
+                          metadata={metadata}
+                          onProfileTable={(path) => setProfilerPath(path)}
+                          onGenerateCode={(path) => setCodeGenPath(path)}
+                          onGenerateTestData={(path) => setTestDataPath(path)}
+                        />
+                      </React.Suspense>
+                    </ChunkBoundary>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full text-fg-muted">
                       <Database strokeWidth={1.5} className="w-12 h-12 mb-4 opacity-30" />
@@ -1253,12 +1276,12 @@ export default function Studio() {
                               playgroundMode={txn.playgroundMode}
                               transactionActive={txn.transactionActive}
                               editingEnabled={editingEnabled}
-                              onSaveQuery={() => setIsSaveQueryModalOpen(true)}
-                              onExecuteQuery={() => queryExec.executeQuery()}
-                              onCancelQuery={() => queryExec.cancelQuery()}
+                              onSaveQuery={openSaveQuery}
+                              onExecuteQuery={runEditorQuery}
+                              onCancelQuery={cancelEditorQuery}
                               {...transactionHandlers}
                               onToggleEditing={onToggleEditing}
-                              onImport={() => setIsImportModalOpen(true)}
+                              onImport={openImport}
                             />
 
                             <div className="flex-1 relative min-h-0">
@@ -1407,10 +1430,10 @@ export default function Studio() {
           server-only and the rail imports nothing from them but types), and no agent
           request is made beyond the discovery probe. `docs/AGENT.md` states the same
           boundary for a reader who never opens this file.
-          This repository lazy-imports libraries but no COMPONENT
-          (neither `next/dynamic` nor `React.lazy` appears under `src/`), and the
-          package boundary — the one that matters for what ships to platform — is
-          pinned separately in T12.
+          The rail is NOT one of the views split out with `React.lazy` (the diagram,
+          the connection dialog, the schema explorer and the bottom panel's views), so
+          its modules load with the shell. The package boundary is pinned separately
+          in T12.
         */}
         {agentEnabled && !isMobile && (
           <>
@@ -1432,27 +1455,27 @@ export default function Studio() {
 
       {/* Modals */}
       {(isConnectionModalOpen || editingConnection !== null) && (
-        <React.Suspense fallback={null}>
-          <ConnectionModal
-            isOpen={isConnectionModalOpen}
-            onClose={() => {
-              setIsConnectionModalOpen(false);
-              setEditingConnection(null);
-            }}
-            onConnect={(c) => {
-              storage.saveConnection(c);
-              const userConns = storage.getConnections();
-              const managedConns = conn.connections.filter(
-                (mc) => mc.managed && !userConns.some((uc) => uc.id === mc.id),
-              );
-              conn.setConnections([...managedConns, ...userConns]);
-              conn.setActiveConnection(c);
-              setIsConnectionModalOpen(false);
-              setEditingConnection(null);
-            }}
-            editConnection={editingConnection}
-          />
-        </React.Suspense>
+        // The dialog has no place of its own in the layout, so its failure notice covers
+        // the shell the way the dialog would have, and Close hands the shell back.
+        <ChunkBoundary label="The connection dialog" className="fixed inset-0 z-50" onDismiss={closeConnectionModal}>
+          <React.Suspense fallback={null}>
+            <ConnectionModal
+              isOpen={isConnectionModalOpen}
+              onClose={closeConnectionModal}
+              onConnect={(c) => {
+                storage.saveConnection(c);
+                const userConns = storage.getConnections();
+                const managedConns = conn.connections.filter(
+                  (mc) => mc.managed && !userConns.some((uc) => uc.id === mc.id),
+                );
+                conn.setConnections([...managedConns, ...userConns]);
+                conn.setActiveConnection(c);
+                closeConnectionModal();
+              }}
+              editConnection={editingConnection}
+            />
+          </React.Suspense>
+        </ChunkBoundary>
       )}
       <CreateTableModal
         isOpen={isCreateTableModalOpen}
