@@ -26,7 +26,7 @@ Three decisions. The first is the consequential one, which is why it is first.
    ([clickhouse.md](./providers/clickhouse.md)), Apache Druid over `POST /druid/v2/sql`
    ([druid.md](./providers/druid.md)), Elasticsearch and OpenSearch over their SQL endpoints
    ([elasticsearch.md](./providers/elasticsearch.md) · [opensearch.md](./providers/opensearch.md)),
-   Apache Trino over its own client protocol ([trino.md](./providers/trino.md)), libSQL over the
+   Trino over its own client protocol ([trino.md](./providers/trino.md)), libSQL over the
    Hrana protocol, `POST /v2/pipeline` ([libsql.md](./providers/libsql.md)), and Prometheus over its
    HTTP API, `/api/v1/*` ([prometheus.md](./providers/prometheus.md)). If it does need one, it
    will be something like `pg`,
@@ -38,7 +38,7 @@ Three decisions. The first is the consequential one, which is why it is first.
      `this.type` — identifier and string escaping, `LIMIT` clause building,
      read-only and DDL detection — plus a `prepareQuery()` that applies the shared query limiter.
      None of it touches a pool, a driver or a connection, so **an HTTP transport is no reason to
-     avoid it.** A standard-SQL engine reached over HTTP, such as ClickHouse, Apache Druid or Apache Trino,
+     avoid it.** A standard-SQL engine reached over HTTP, such as ClickHouse, Apache Druid or Trino,
      should extend it and get all of that for free. Druid is the clearest case of how little is left over:
      double-quoted identifiers and `LIMIT n OFFSET m` are both correct Druid SQL, so
      `escapeIdentifier()` and `buildLimitClause()` are inherited unchanged and `prepareQuery()` is
@@ -90,7 +90,7 @@ Score a candidate before writing code. Each criterion you fail becomes code you 
 | 4 | **Is there monitoring data over the same surface?** | Decides how much of the monitoring panel is real rather than honestly empty |
 | 5 | **Is there an EXPLAIN?** | Decides `supportsExplain` and whether a strategy is needed |
 | 6 | **How complex is auth?** | Basic auth is three lines. SigV4, OAuth2 refresh or Kerberos is a library — and that is usually where the no-dependency promise ends |
-| 7 | **Does the data model map onto containers, kinds and objects?** | The object surface addresses an object by a path of segments, so a hierarchy is declared through `containerLevels` and `objectKinds` rather than flattened into a display name |
+| 7 | **Does the data model map onto containers, kinds and objects, and is an outer container level alone a real address?** | The object surface addresses an object by a path of segments, so a hierarchy is declared through `containerLevels` and `objectKinds` rather than flattened into a display name. Then choose `containerPathShapes` and declare it in `getCapabilities()`: `exact` when only the declared depth is an address (a PostgreSQL schema, a MongoDB database), `prefixes` when the outer levels alone are one too (a Trino catalog with no schema, a Couchbase bucket with no scope). An absent field reads as `exact`, and the provider's own check and the HTTP object routes both refuse by that one declaration through `acceptedContainerShapes()` in `src/lib/db/object-kinds.ts` |
 
 A good sanity check for criterion 1: **can a browser talk to it?** Couchbase's own Web Console and
 the Capella UI are browser applications, so every service had to be reachable over HTTP for the
@@ -426,7 +426,7 @@ bun add <driver-package>
 # ClickHouse needs no driver — plain SQL over its HTTP interface (port 8123)
 # Apache Druid needs no driver — plain SQL over POST /druid/v2/sql (Router 8888 or Broker 8082)
 # Elasticsearch / OpenSearch need no driver — SQL over _sql / _plugins/_sql (port 9200)
-# Apache Trino needs no driver — SQL over its client protocol, POST /v1/statement (port 8080)
+# Trino needs no driver — SQL over its client protocol, POST /v1/statement (port 8080)
 # libSQL needs no driver — SQLite's dialect over the Hrana protocol, POST /v2/pipeline (port 8080)
 # bun add cassandra-driver  (Apache Cassandra — a binary protocol over TCP, so a driver is not
 #                            optional; this one is pure JS, which is the next best thing)
@@ -747,7 +747,7 @@ const result = await provider.query(prepared.query);
 | Field | Purpose |
 |-------|---------|
 | `query` | The (possibly modified) query string to execute |
-| `wasLimited` | Whether a LIMIT was injected. The query route reports it on the response's `pagination.wasLimited`, which the stats strip shows as the "limited" badge. A provider that bounds its own result instead, as the Prometheus provider cuts a vector at its series cap and the Kafka provider cuts a read at its row limit, its result byte budget and its cell limit, returns `false` here and reports its bound on `QueryResult.pagination.wasLimited`, which `POST /api/db/query` keeps (#1085, section 5.4); such a bound never sets `hasMore`, because no offset can advance it |
+| `wasLimited` | Whether a LIMIT was injected. This preparation flag is unchanged for short results; the query and transaction routes report it on the response's `pagination.wasLimited` only when the returned page fills that bound, which the stats strip shows as the "limited" badge. A provider that bounds its own result instead, as the Prometheus provider cuts a vector at its series cap and the Kafka provider cuts a read at its row limit, its result byte budget and its cell limit, returns `false` here and reports its bound on `QueryResult.pagination.wasLimited`, which `POST /api/db/query` keeps (#1085, section 5.4); such a bound never sets `hasMore`, because no offset can advance it |
 | `limit` | The effective row limit |
 | `offset` | The effective offset |
 
@@ -785,7 +785,7 @@ declares them. See [cassandra.md](./providers/cassandra.md).
 ([#263](https://github.com/libredb/libredb-studio/issues/263)), ClickHouse
 ([#264](https://github.com/libredb/libredb-studio/issues/264)), Apache Druid
 ([#265](https://github.com/libredb/libredb-studio/issues/265)), Elasticsearch + OpenSearch
-([#424](https://github.com/libredb/libredb-studio/issues/424), Phase 1) Apache Trino
+([#424](https://github.com/libredb/libredb-studio/issues/424), Phase 1) Trino
 ([#424](https://github.com/libredb/libredb-studio/issues/424), Phase 2) and Apache Cassandra
 ([#424](https://github.com/libredb/libredb-studio/issues/424), Phase 4 - the first phase to add a
 runtime dependency, and a pure-JS one).
@@ -901,7 +901,7 @@ Those three reach code and tests only; the four prose greps of the published blo
 - [ ] `src/lib/sql/values.ts`: `LITERAL_ESCAPE`.
 - [ ] `src/lib/export/result-export.ts`: `STANDS_ALONE` and `BINARY_LITERAL`, plus a decision on the partial `DIALECT_TYPES`.
 - [ ] `tests/helpers/census-connection.ts`: `CENSUS_CONNECTION`, the unconnected connection every census builds through the real factory.
-- [ ] `tests/isolated/object-column-declarations.test.ts` (`EXPECTED_COLUMN_KINDS`), `tests/isolated/object-source-declarations.test.ts` (`SOURCE_DECLARATIONS`), `tests/unit/db/result-pagination-capability.test.ts` (`EXPECTED`), `tests/unit/schema-diff/migration-dialects.test.ts` (`COLUMN_GRAMMAR`), `tests/unit/schema-diff/migration-generator.test.ts` (`MODIFIED_COLUMN_COVERAGE`, `TRANSACTION_WRAPPER_COVERAGE`) and `tests/hooks/use-connection-form.test.ts` (`PICKER_COVERAGE`).
+- [ ] `tests/isolated/object-column-declarations.test.ts` (`EXPECTED_COLUMN_KINDS`), `tests/isolated/object-source-declarations.test.ts` (`SOURCE_DECLARATIONS`), `tests/unit/db/result-pagination-capability.test.ts` (`EXPECTED`), `tests/unit/db/container-path-shapes-capability.test.ts` (`EXPECTED_CONTAINER_PATH_SHAPES`), `tests/unit/schema-diff/migration-dialects.test.ts` (`COLUMN_GRAMMAR`), `tests/unit/schema-diff/migration-generator.test.ts` (`MODIFIED_COLUMN_COVERAGE`, `TRANSACTION_WRAPPER_COVERAGE`) and `tests/hooks/use-connection-form.test.ts` (`PICKER_COVERAGE`).
 - [ ] `tests/unit/lib/db-ui-config.test.ts`: `ALL_TYPES`, which a test holds equal to the keys of `DB_UI_CONFIG`.
 - [ ] `tests/helpers/object-edit-expectation.ts`: `EXPECTED_EDIT_ABSTAINERS`, when the new id declares no editable kind.
       That is a population, not a record, so the compiler says nothing; `tests/isolated/object-edit-declarations.test.ts` then requires an `Object edit (#789)` heading in the new provider doc naming which absence it is.

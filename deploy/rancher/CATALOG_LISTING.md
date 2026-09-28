@@ -19,7 +19,7 @@ What gets mailed is `pcsc-listing.html` beside this file, not the sections below
 > from the release that carries **Apache Kafka** ([#1088](https://github.com/libredb/libredb-studio/issues/1088)), which followed Prometheus; seventeen is true of a release that carries **Prometheus** ([#1085](https://github.com/libredb/libredb-studio/issues/1085)) and not Kafka, if one is cut,
 > which followed DuckDB; sixteen was true from the release that carried **DuckDB**
 > ([#424](https://github.com/libredb/libredb-studio/issues/424)), which followed libSQL, and fourteen from **0.13.0** onwards, the release that carried
-> Elasticsearch, OpenSearch, Apache Trino and Apache Cassandra alongside the ten of 0.11.0.
+> Elasticsearch, OpenSearch, Trino and Apache Cassandra alongside the ten of 0.11.0.
 > The number is the `SHIPPED` record in
 > `src/lib/db/compatibility.ts` minus the embedded `libredb`, which `EXTERNAL` in the same
 > file already splits out; read it from there rather than from this file. The catalog entry
@@ -32,7 +32,7 @@ What gets mailed is `pcsc-listing.html` beside this file, not the sections below
 > the providers: `supportsInlineRowEdit` and `supportsCreateTable` default to `true` in
 > `src/lib/db/base-provider.ts` and each provider that cannot turns them off, which leaves inline
 > row editing on PostgreSQL, MySQL, Oracle, SQL Server, SQLite, libSQL and DuckDB, and table
-> creation on those seven plus Apache Trino. Every other engine (Cassandra, ClickHouse, Couchbase, Druid,
+> creation on those seven plus Trino. Every other engine (Cassandra, ClickHouse, Couchbase, Druid,
 > Elasticsearch, Apache Kafka, MongoDB, OpenSearch, Prometheus and Redis) reports those controls as unsupported. The
 > reason differs per engine and the copy must not flatten it: on Elasticsearch no mutation is in
 > the SQL grammar at all, while OpenSearch's grammar carries exactly one — `DELETE`, off by
@@ -51,10 +51,14 @@ What gets mailed is `pcsc-listing.html` beside this file, not the sections below
 > no listing may say the assistant writes SQL from a plain-English question. What ships is
 > AI query *explanation*, and it is **not** available on any connection: the write-up is
 > derived from the engine's own `EXPLAIN` plan, and `src/components/studio/BottomPanel.tsx`
-> drops the Explain tab unless the provider declares `explainFormat`. Seven do — PostgreSQL,
-> MySQL, SQLite, Couchbase, ClickHouse, Apache Druid and Apache Trino — so name that set rather
-> than a count, and check it by grepping `explainFormat:` under `src/lib/db/providers/` rather
-> than by trusting this line. Alongside it is the read-only agent rail
+> drops the Explain tab unless the provider declares `explainFormat`. Nine do — PostgreSQL,
+> MySQL, SQLite, libSQL, DuckDB, Couchbase, ClickHouse, Apache Druid and Trino — so name that
+> set rather than a count, and check it by grepping `explainFormat:` under
+> `src/lib/db/providers/` rather than by trusting this line. Keep the colon: without it the
+> search provider's own account of why it declares none is counted as a declaration, and the
+> answer comes back as ten. PostgreSQL and MySQL spread the value in from a connect-time
+> probe instead of writing a literal, which is why `DECLARES_EXPLAIN_FORMAT` in
+> `tests/unit/marketplace-copy.test.ts` carries a second alternative for them. Alongside it is the read-only agent rail
 > ([`docs/AGENT.md`](https://github.com/libredb/libredb-studio/blob/main/docs/AGENT.md)),
 > which executes statements on PostgreSQL, SQLite, DuckDB and SQL Server only (`queryReadOnly`
 > exists on those four providers alone), with the database and not the IDE refusing the write. Do
@@ -125,24 +129,24 @@ What gets mailed is `pcsc-listing.html` beside this file, not the sections below
 
 LibreDB Studio is an MIT-licensed, AI-assisted open source SQL IDE that connects to
 PostgreSQL, MySQL, Oracle, SQL Server, SQLite, libSQL, DuckDB, MongoDB, Redis, Couchbase,
-ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra,
+ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Trino, Apache Cassandra,
 Prometheus and Apache Kafka directly from the browser.
 
 ## Long description
 
 LibreDB Studio brings a full SQL IDE to Rancher-managed Kubernetes clusters: browse
 schemas and run queries across PostgreSQL, MySQL, Oracle, SQL Server, SQLite, libSQL, DuckDB,
-MongoDB, Redis, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Apache Trino,
+MongoDB, Redis, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Trino,
 Apache Cassandra, Prometheus and Apache Kafka from a single web interface, with no desktop
 client to install. Editing
 data follows the engine rather than the IDE: inline row editing on PostgreSQL, MySQL,
-Oracle, SQL Server, SQLite, libSQL and DuckDB, table creation on those seven and Apache Trino, and
+Oracle, SQL Server, SQLite, libSQL and DuckDB, table creation on those seven and Trino, and
 everywhere else the controls are reported as unsupported rather than offered and then
 failed — Elasticsearch SQL has no mutation in its grammar at all, OpenSearch's one
 mutation (`DELETE`) is off by default, and Druid SQL has no `UPDATE`, no `DELETE` and no
 `CREATE TABLE`. An optional AI assistant (bring your own key: Gemini, OpenAI, or a local
 model) writes up a query in plain English from the engine's own EXPLAIN plan, on
-PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Couchbase, ClickHouse, Apache Druid and Apache Trino,
+PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Couchbase, ClickHouse, Apache Druid and Trino,
 the engines that return one. It also runs a read-only investigation agent on PostgreSQL,
 SQLite, DuckDB and SQL Server whose every claim cites the result it came from, and that never writes:
 the database, not the IDE, is what refuses writes and DDL. It stays off unless
@@ -160,12 +164,12 @@ versions are documented and validated for every release.
 
 - Eighteen database engines in one browser-based IDE: PostgreSQL, MySQL, Oracle,
   SQL Server, SQLite, libSQL, DuckDB, MongoDB, Redis, Couchbase, ClickHouse, Apache Druid,
-  Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra, Prometheus, Apache Kafka
+  Elasticsearch, OpenSearch, Trino, Apache Cassandra, Prometheus, Apache Kafka
 - One-click install from the Rancher Apps catalog — deployable with default values,
   zero configuration required
 - Optional AI assistance (Gemini, OpenAI, or a self-hosted model; off by default):
   plain-English query explanation on the engines that return an EXPLAIN plan (PostgreSQL,
-  MySQL, SQLite, libSQL, DuckDB, Couchbase, ClickHouse, Apache Druid, Apache Trino). Plus a
+  MySQL, SQLite, libSQL, DuckDB, Couchbase, ClickHouse, Apache Druid, Trino). Plus a
   read-only investigation agent on PostgreSQL, SQLite, DuckDB and SQL Server that never writes — the
   database, not the IDE, is what refuses the write
 - Hardened chart defaults: non-root, read-only root filesystem, NetworkPolicy, PDB,

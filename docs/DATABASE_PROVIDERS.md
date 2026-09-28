@@ -59,7 +59,7 @@ src/lib/db/
 │   │   │   ├── transport.ts    #   CassandraTransport seam + neutral result + fault categories
 │   │   │   ├── driver-transport.ts # The one file that imports cassandra-driver
 │   │   │   └── introspect.ts   #   system_schema + system_views -> schema and monitoring
-│   │   └── trino/              # Apache Trino Strategy (SQL over the client protocol, no driver)
+│   │   └── trino/              # Trino Strategy (SQL over the client protocol, no driver)
 │   │       ├── index.ts        #   TrinoProvider
 │   │       ├── transport.ts    #   TrinoTransport seam + error categories + the dialect descriptor
 │   │       ├── http-transport.ts # The one HTTP implementation (fetch); the nextUri page loop
@@ -209,7 +209,7 @@ monitoring, limitations, …) see the prime docs in **[`docs/providers/`](./prov
 | Apache Druid | `druid` | SQL (read-only) | [providers/druid.md](./providers/druid.md) |
 | Elasticsearch | `elasticsearch` | Search (SQL, read-only) | [providers/elasticsearch.md](./providers/elasticsearch.md) |
 | OpenSearch | `opensearch` | Search (SQL, read-only) | [providers/opensearch.md](./providers/opensearch.md) |
-| Apache Trino | `trino` | SQL (federated query engine) | [providers/trino.md](./providers/trino.md) |
+| Trino | `trino` | SQL (federated query engine) | [providers/trino.md](./providers/trino.md) |
 | Apache Cassandra | `cassandra` | SQL-shaped (CQL, wide-column) | [providers/cassandra.md](./providers/cassandra.md) |
 | Prometheus | `prometheus` | Time series (PromQL over HTTP, read-only) | [providers/prometheus.md](./providers/prometheus.md) |
 | Apache Kafka | `kafka` | Stream (JSON read requests over the Kafka protocol, read-only) | [providers/kafka.md](./providers/kafka.md) |
@@ -242,7 +242,7 @@ interface DatabaseProvider {
   getHealth(): Promise<HealthInfo>;
 
   // Maintenance operations
-  runMaintenance(type: MaintenanceType, target?: string): Promise<MaintenanceResult>;
+  runMaintenance(type: MaintenanceType, target?: string, container?: string): Promise<MaintenanceResult>;
 
   // Validation
   validate(): void;
@@ -392,7 +392,7 @@ Provider-specific behaviour — pooling model, SSL/encryption, pagination, monit
 maintenance operations, and known limitations — is documented per provider under
 [`docs/providers/`](./providers/README.md). Start there for anything specific to PostgreSQL, MySQL,
 Oracle, SQL Server, SQLite, libSQL, DuckDB, Redis, MongoDB, Couchbase, ClickHouse, Apache Druid,
-Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra, Prometheus, Apache Kafka, or LibreDB.
+Elasticsearch, OpenSearch, Trino, Apache Cassandra, Prometheus, Apache Kafka, or LibreDB.
 
 Not every provider has every feature, and the docs record the absences rather than glossing over
 them. Druid is the sharpest case: its SQL has no `UPDATE`, no `DELETE` and no `CREATE TABLE`, no

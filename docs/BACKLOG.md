@@ -28,16 +28,16 @@ None of it is a GitHub issue.
 **Sections**
 
 - [SQL statement reading](#sql-statement-reading) — S2–S6 · 4
-- [Drivers and connections](#drivers-and-connections) — D1-D128, U17 · 73
+- [Drivers and connections](#drivers-and-connections) — D1-D129, U17 · 73
 - [Value interpolation](#value-interpolation) — V1
 - [Row editing](#row-editing) — R1–R3 · 3
 - [Studio UI and query execution](#studio-ui-and-query-execution) — X2-X19, U2-U54 · 41
 - [Dependencies](#dependencies) — P1–P5 · 5
-- [Documentation](#documentation) — DOC3–DOC7 · 4
+- [Documentation](#documentation) — DOC3-DOC8 · 5
 - [Release pipeline](#release-pipeline) — REL1–REL4 · 4
 - [Chart configuration surface](#chart-configuration-surface) — N1 · 1
-- [Security Phase 1 deferrals](#security-phase-1-deferrals) — H1–H12 · 3
-- [Security Phase 2 deferrals](#security-phase-2-deferrals) — C3–C11 · 7
+- [Security Phase 1 deferrals](#security-phase-1-deferrals) — H1–H14 · 4
+- [Security Phase 2 deferrals](#security-phase-2-deferrals) — C3–C11 · 6
 - [Security Phase 3 deferrals](#security-phase-3-deferrals) — K4
 - [Security scanner triage](#security-scanner-triage) — SCAN1 · 1
 - [Agent M1 deferrals (#328)](#agent-m1-deferrals-328) — A1–A8 · 7
@@ -380,47 +380,32 @@ One test per transport pins that a supplied CA and a `verify-*` mode reach the r
 
 ### D39. A slow-query source nobody could read is still a row, and on the other path it is silence
 
-Found 2026-08-27 by the audit that closed the curated health projection's cap-as-count defect. #512
-removed MySQL's fabricated "Performance schema not available" row; three providers still ship the
-same shape, in the same field:
+Found 2026-08-27 by the audit that closed the curated health projection's cap-as-count defect.
+#512 removed MySQL's fabricated "Performance schema not available" row; four providers still ship the same shape, in the same field:
 
-- `src/lib/db/providers/sql/postgres.ts:1241` - a database without `pg_stat_statements` answers
-  `[{ query: "pg_stat_statements extension not enabled", calls: 0, avgTime: "N/A" }]`.
-- `src/lib/db/providers/document/mongodb.ts:785` - a database whose profiler is off answers
-  `[{ query: "Profiler not enabled. Run db.setProfilingLevel(1) to enable." }]`, and the outer catch
-  at `:830` answers `[{ query: "Error fetching health info" }]` for a read that failed entirely.
-- `src/lib/db/providers/sql/sqlite.ts:707-717` - EVERY SQLite database answers two synthetic rows,
-  `Integrity: OK|FAILED` and `Journal Mode: <mode>`, about statements that were never executed.
+- `getHealth()` in `src/lib/db/providers/sql/postgres.ts`: a database without `pg_stat_statements` answers `[{ query: "pg_stat_statements extension not enabled", calls: 0, avgTime: "N/A" }]`.
+- `getHealth()` in `src/lib/db/providers/document/mongodb.ts`: a database whose profiler is off answers `[{ query: "Profiler not enabled. Run db.setProfilingLevel(1) to enable." }]`, and the outer catch of the same method answers `[{ query: "Error fetching health info" }]` for a read that failed entirely.
+- `getHealth()` in `src/lib/db/providers/sql/sqlite.ts`: EVERY SQLite database answers two synthetic rows, `Integrity: OK|FAILED` and `Journal Mode: <mode>`, about statements that were never executed.
+- `readHealth()` in `src/lib/db/providers/sql/libsql/introspect.ts`: every libSQL database answers the same two synthetic rows, `Integrity: OK|FAILED` and `Journal Mode: <mode>`.
 
-A sentence wearing a row's clothes is the fabrication the absence rule (#477) forbids, and here it is
-worse than a zero: a caller counting the list gets 1, 1 and 2 rather than 0. Nothing counts it in the
-app any more - the agent's curated reading stopped, and `HealthInfo.slowQueries` now has no
-production consumer at all - but `POST /api/db/health` serialises the whole `HealthInfo`
-(`docs/API_DOCS.md`), so anyone embedding `@libredb/studio` and reading that body inherits all three.
+A sentence wearing a row's clothes is the fabrication the absence rule (#477) forbids, and here it is worse than a zero: a caller counting the list gets 1, 1, 2 and 2 rather than 0.
+Nothing counts it in the app any more - the agent's curated reading stopped, and `HealthInfo.slowQueries` now has no production consumer at all - but `POST /api/db/health` serialises the whole `HealthInfo` (`docs/API_DOCS.md`), so anyone embedding `@libredb/studio` and reading that body inherits all four.
 
 **The fix is a type change with a 15-type-id blast radius, which is why it is here and not in #512's
 PR.** `HealthInfo.slowQueries` is a required `SlowQuery[]` (`src/lib/db/types.ts`) with no field a
-reason could travel in, so "nobody could look" has no representation. Making it optional the way
-`activeConnections` already is touches every provider, every provider doc and every provider test
-file, and falsifies `src/lib/db/compatibility.ts:267`, `docs/providers/postgres.md:164`,
-`tests/integration/db/postgres-provider.test.ts:1325`, `tests/integration/db/sqlite-provider.test.ts`
-and `tests/helpers/sqlite-node-harness.ts:104`, all of which pin the current sentences.
+reason could travel in, so "nobody could look" has no representation.
+Making it optional the way `activeConnections` already is touches every provider, every provider doc and every provider test file, and falsifies the AlloyDB Omni caveat in `WIRE_COMPATIBLE_ENGINES` (`src/lib/db/compatibility.ts`), section "3.5 Resilient monitoring" of `docs/providers/postgres.md`, the test "pg_stat_statements fallback when extension is not enabled" in `tests/integration/db/postgres-provider.test.ts`, `tests/integration/db/sqlite-provider.test.ts`, `tests/integration/db/sqlite-node-harness.ts`, `tests/integration/db/libsql-provider.test.ts` and `tests/unit/db/libsql/introspect.test.ts`, all of which pin the current sentences.
 
-**The other path swallows instead of fabricating, and that is not better.** On the `slow-queries`
-reading the agent actually uses, `src/lib/db/providers/keyvalue/redis.ts:622-624` and
-`src/lib/db/providers/document/mongodb.ts:1041-1043` `return []` from their catch where MySQL now
-rejects. So a denied grant reaches the model as an empty reading, and the run prompt tells it
-`"A reading that comes back EMPTY is an answer, not a failure - no blocked session, no slow query,
-no unused index is what a healthy server looks like"` (`src/lib/agent/investigation.ts:1485`). It
-also costs the operator the reason: `getMonitoringData` records `errors.slowQueries` from a REJECTION
-(`src/lib/db/base-provider.ts:147`), and a resolved `[]` records nothing, so the panel says "no slow
-queries" where the truth is that the profiler is off.
+**The other path swallows instead of fabricating, and that is not better.**
+On the `slow-queries` reading the agent actually uses, `getSlowQueries()` in `src/lib/db/providers/keyvalue/redis.ts` and `getSlowQueries()` in `src/lib/db/providers/document/mongodb.ts` `return []` from their catch where MySQL now rejects.
+So a denied grant reaches the model as an empty reading, and the run prompt tells it `"A reading that comes back EMPTY is an answer, not a failure - no blocked session, no slow query, no unused index is what a healthy server looks like"` (`WORKFLOW_TOOL_RULES` in `src/lib/agent/investigation.ts`).
+It also costs the operator the reason: `getMonitoringData()` in `src/lib/db/base-provider.ts` records `errors.slowQueries` from a REJECTION, and a resolved `[]` records nothing, so the panel says "no slow queries" where the truth is that the profiler is off.
 
 **Done when:** a slow-query source that could not be read is absent-with-a-reason on both paths - no
 provider answers a sentence as a row, and no provider answers `[]` for a read that failed - and the
 count of type-ids the type change touched is stated in the PR rather than discovered during it.
 
-### D44. `databaseSizeBytes` is fabricated as 0 wherever the size is unknown, in 11 of 18 type-ids
+### D44. `databaseSizeBytes` is fabricated as 0 wherever the size is unknown, in 4 of 19 type-ids
 
 Found 2026-08-27 by the sweep that closed the overview connection count's fabricated zero (D40, PR
 round 17). `DatabaseOverview.activeConnections` and `DatabaseOverview.databaseSizeBytes` are optional
@@ -428,24 +413,14 @@ for the SAME stated reason (`src/lib/db/types.ts`, the D17 docblock): absence an
 facts. The round closed the first field on three providers. The second is unclosed almost everywhere.
 
 **Two providers get it right, and one of them wrote the argument down.**
-`src/lib/db/providers/sql/cassandra/introspect.ts:582` omits the key with the comment "a zero is a
-measurement, and the Storage tab read `?? 0` and rendered '0 B' with a 0.0% breakdown from it", and
-MongoDB's `getOverview()` catch now omits it too.
+`getOverview()` in `src/lib/db/providers/sql/cassandra/introspect.ts` omits the key with the comment "a zero is a measurement, and the Storage tab read `?? 0` and rendered '0 B' with a 0.0% breakdown from it", and MongoDB's `getOverview()` catch now omits it too.
 
 **The rest fabricate.** Measured by reading every `databaseSizeBytes` assignment under
 `src/lib/db/providers/`:
-- Self-contradicting within one object, and the clearest cases, because the sibling string field
-  already says the figure is unavailable: `sql/trino/introspect.ts:621` pairs a literal `0` with
-  `databaseSize: TRINO_UNAVAILABLE_TEXT`, and `sql/search/index.ts:849` pairs `sizeBytes ?? 0` with
-  `databaseSize: SEARCH_UNKNOWN_TEXT` for both `elasticsearch` and `opensearch`.
-- Swallowed into an initialiser the way D40's connection counts were: `sql/mssql.ts:1111`,
-  `sql/oracle.ts:1154`, `sql/sqlite.ts:794`.
-- Coerced by a helper that returns 0 for an absent row: `sql/druid/introspect.ts:578` and
-  `sql/clickhouse/index.ts:833` through their local `asNumber`.
-- Coerced inline: `sql/postgres.ts:1360` and `sql/mysql.ts:1158` (`parseInt(... || "0")`),
-  `sql/libsql/introspect.ts:399` and `document/couchbase/index.ts:606` (`?? 0`),
-  `keyvalue/redis.ts:590`, and `embedded/libredb.ts:709`, whose `fileSizeBytes()` returns 0 when the
-  `statSync` throws.
+- Self-contradicting within one object, and the clearest cases, because the sibling string field already says the figure is unavailable: `sql/trino/introspect.ts` pairs a literal `0` with `databaseSize: TRINO_UNAVAILABLE_TEXT`, and `sql/search/index.ts` pairs `sizeBytes ?? 0` with `databaseSize: SEARCH_UNKNOWN_TEXT` for both `elasticsearch` and `opensearch`.
+- Swallowed into an initialiser the way D40's connection counts were: `sql/mssql.ts`, `sql/oracle.ts`, `sql/sqlite.ts`.
+- Coerced by a helper that returns 0 for an absent row: `sql/druid/introspect.ts` and `sql/clickhouse/index.ts` through their local `asNumber`.
+- Coerced inline: `sql/postgres.ts` and `sql/mysql.ts` (`parseInt(... || "0")`), `sql/libsql/introspect.ts` and `document/couchbase/index.ts` (`?? 0`), `keyvalue/redis.ts`, and `embedded/libredb.ts`, whose `fileSizeBytes()` returns 0 when the `statSync` throws.
 
 **The consumer makes it visible.** `src/components/monitoring/tabs/StorageTab.tsx` keys its entire
 breakdown off `overview?.databaseSizeBytes !== undefined`: present, and the card renders percentages
@@ -460,17 +435,21 @@ file. That round also measured a mechanism this entry had missed: Couchbase does
 wraps the read in `degradeTo(..., {})`, so a REFUSED bucket read reaches `basicStats?.diskUsed ?? 0` and
 publishes a measured-looking zero - see D51, which is the same shape on the field beside this one.
 
+**Seven of the eleven are closed on main since** - they now leave `databaseSizeBytes` out when the size is unknown.
+PostgreSQL and MySQL in #627, SQLite and LibreDB in #1050 (for #546), SQL Server and Oracle in #579, and libSQL in #569.
+The symbols are `getOverview()` in `src/lib/db/providers/sql/postgres.ts`, `src/lib/db/providers/sql/mysql.ts`, `src/lib/db/providers/sql/sqlite.ts`, `src/lib/db/providers/sql/mssql.ts` and `src/lib/db/providers/sql/oracle.ts`, `readOverview()` in `src/lib/db/providers/sql/libsql/introspect.ts`, and `getOverview()` in `src/lib/db/providers/embedded/libredb.ts`.
+
 **The counts moved for a second reason.** DuckDB arrived as a seventeenth type-id in #516 and gets this
 right without being asked: `duckdb/introspect.ts` spreads the key conditionally and spells the string
 `"N/A"` when the database is in-memory. So it is a fourth correct provider rather than a fifteenth
 fabricating one, and it independently reached the same encoding this entry prescribes.
-Prometheus, the eighteenth type-id (#1085), leaves the key absent too (`overviewFrom` in `src/lib/db/providers/timeseries/prometheus/monitoring.ts`), so the eleven that fabricate are eleven of eighteen.
+Prometheus, the eighteenth type-id (#1085), leaves the key absent too (`overviewFrom` in `src/lib/db/providers/timeseries/prometheus/monitoring.ts`).
+Kafka, the nineteenth type-id (#1088), does the same (`overviewFrom` in `src/lib/db/providers/stream/kafka/monitoring.ts`), so the four that fabricate are four of nineteen.
 
-**Done when:** an unknown size is absent rather than 0 on the remaining eleven type-ids, a real zero
+**Done when:** an unknown size is absent rather than 0 on the remaining four type-ids, a real zero
 still reads as zero, each provider's doc records it, and each provider's test pins both arms - the same
-shape D40 used, applied to the field beside it. Remaining: `sql/postgres.ts`, `sql/mysql.ts`,
-`sql/sqlite.ts`, `sql/mssql.ts`, `sql/oracle.ts`, `sql/libsql/introspect.ts`, `sql/druid/introspect.ts`,
-`sql/clickhouse/index.ts`, `document/couchbase/index.ts`, `keyvalue/redis.ts` and `embedded/libredb.ts`.
+shape D40 used, applied to the field beside it.
+Remaining: `getOverview()` in `src/lib/db/providers/sql/druid/introspect.ts` and in `src/lib/db/providers/sql/clickhouse/index.ts` (the local `asNumber`, which returns 0 for an absent value), `getOverview()` in `src/lib/db/providers/document/couchbase/index.ts` (`basicStats?.diskUsed ?? 0`), and `getOverview()` in `src/lib/db/providers/keyvalue/redis.ts` (`parseInt(parsed.used_memory || "0")`).
 MongoDB is NOT on that list: its catch and its success path both spread conditionally already.
 
 Doing it per family, one PR each, is the cheap ordering, and #517 is the pattern to copy - including the
@@ -515,47 +494,6 @@ current database, and that permission cannot be granted in `master`.
 `SERVERPROPERTY('ProductMajorVersion')` to pick the permission name - and an incomplete count is absent
 rather than published. Measured on a real instance with a login that has neither grant, because the
 whole entry rests on a permission boundary no fixture can prove.
-
-### D49. Per-table maintenance drops the schema, so every table outside the default one refuses
-
-Found 2026-08-27 in the BROWSER while registering `duckdb` (issue #424). Not DuckDB's defect - the
-provider is the half that behaves - and no gate could have caught it: the six local gates, 100%
-line coverage and a four-lens adversarial review all passed over it, because the two halves are
-correct in isolation and only the running product puts them together.
-
-`TablesTab.tsx:390` calls `handleMaintenance(type, table.tableName)` - the BARE table name - from a
-row whose very next line (`:350`) renders `table.schemaName` beside it. Every provider's
-`qualifyMaintenanceTarget` then supplies a default schema for an unqualified target:
-`postgres.ts:1287` returns `"public." + escapeIdentifier(target)`, and
-`duckdb/index.ts:712` returns `"main"."<target>"`. So the statement names a table that is not there.
-
-Measured on DuckDB v1.5.5, clicking **Analyze Table** on the `analytics.events` row:
-
-```
-Catalog Error: Table with name events does not exist! Did you mean "analytics.events"?
-LINE 1: ANALYZE "main"."events"
-```
-
-`POST /api/db/maintenance` answers 400 and the panel prints the engine's message, so it is visible
-rather than silent - but the button cannot succeed on any table outside the default schema, on any
-engine. It went unnoticed because the fixtures the other engines are exercised with keep their
-tables in the default schema; DuckDB is simply the first whose fixture carries a second one.
-
-This is #U9 one layer up. #U9 was an operation DECLARED in the wrong placement (Oracle offered
-`optimize` per table, and the target it sent was rejected); this is the right placement sending an
-under-qualified target.
-
-Deliberately not fixed in the provider PR that found it. The one-line repair - passing
-`` `${table.schemaName}.${table.tableName}` `` - changes the target string reaching all TWELVE
-providers that implement `runMaintenance` (postgres, mysql, mssql, oracle, sqlite, libsql, duckdb,
-clickhouse, cassandra, druid, trino, search), and each has its own qualification and its own
-statement grammar: SQLite has no user schemas, MySQL's `OPTIMIZE TABLE` takes `db.table`, and the
-HTTP engines build their own paths. That is a twelve-engine live verification, not a provider
-change.
-
-**Done when:** the row passes the qualified name, every one of the twelve providers has been
-measured against a table outside its default schema (or recorded as having no such concept), and a
-component test pins the target the row sends so it cannot silently revert to the bare name.
 
 ### D51. Four providers degrade a refused monitoring read to no rows, then read the absent row as 0
 
@@ -1240,47 +1178,6 @@ test pins the behaviour that was chosen.
 
 ---
 
-# D94 (proposed): hand-copied source coordinates across this repository are stale by thousands of lines
-
-**Status:** proposed, wave 6 slot B fix round.
-
-Found while re-deriving the two `postgres.ts` citations that this round's two added import lines
-moved. `src/lib/api/object-route.ts` is the ONLY file whose citations are guarded, by
-`tests/unit/lib/api/object-route-edit.test.ts`, which resolves each anchor and compares the number.
-Every other `file.ts:NNNN` in the repository is hand-copied prose, and a sample of nine measured at
-`64ee0e3f^` was wrong before this round touched anything:
-
-| Citation | Cited in | Anchor actually at |
-|---|---|---|
-| `postgres.ts:917` (`queryReadOnly`) | `docs/AGENT_GUIDE.md:925` | 2396 |
-| `postgres.ts:891` (`BEGIN READ ONLY`) | `docs/AGENT_ANALYST_DESIGN.md:400`, `:718` (file later deleted) | 2415 |
-| `postgres.ts:894` (`SET LOCAL statement_timeout`) | `src/lib/agent/tools.ts:1552` | 2418 |
-| `postgres.ts:2070-2074` (`{ ...baseConfig, connectionString }`) | `src/lib/db/connection-fingerprint.ts:67`, `tests/api/db/objects/edit-apply.test.ts:91`, `tests/unit/lib/db/connection-fingerprint.test.ts` x3 | 2256-2262 |
-| `postgres.ts:1241` (`pg_stat_statements extension not enabled`) | `docs/BACKLOG.md:326` | 4001 |
-| `postgres.ts:1287` (`"public." + escapeIdentifier`) | `docs/BACKLOG.md:467` | 4048 |
-| `source-applier.ts:155` (the silent-status sentence) | `tests/components/object-source/ApplyPreviewDialog.test.tsx:1092` | `whenSilent`, elsewhere |
-| `StudioWorkspace.tsx:494` (`<main className="flex-1 overflow-hidden relative">`) | `docs/BACKLOG.md:1360` | 823 |
-| `StudioWorkspace.tsx:833` (the `ObjectSourceView` mount) | `docs/BACKLOG.md:1145` | 919 |
-
-Nine of nine wrong, none of them by this round: the smallest miss is over 500 lines. A reader who
-follows one lands on an unrelated line and cannot tell a moved anchor from a deleted one, and an
-agent that re-derives its own citations after an edit, which this epic has now asked for three
-times, is paying a per-commit tax on coordinates that were never right.
-
-Two halves, and the second is what stops it recurring:
-
-1. Re-derive, or drop, every `file.ts:NNNN` outside `object-route.ts`. Dropping is often the better
-   answer: an anchor quoted as text (`queryReadOnly`, `BEGIN READ ONLY`) is grep-able for ever, while
-   a number is correct only until the next commit.
-2. Generalise the guard. `tests/unit/lib/api/object-route-edit.test.ts` already holds the whole
-   mechanism: a table of `{ as, file, anchor }` and a check that the rendered `as:line` appears in
-   the citing source. Lift it to a repository-wide test that scans for the `file.ts:NNNN` shape,
-   resolves each, and fails on a miss, so a coordinate cannot go stale silently again.
-
-**Done when:** a test fails on a stale `file.ts:NNNN` anywhere under `src/`, `docs/` and `tests/`,
-and the citations present at that commit all resolve. The test needs one case per shape it must
-accept, a single line, a range and a comma pair, and one negative that fails when an anchor moves.
-
 ### D85. The `@/lib/auth` mock is hand-copied across a layer, untyped, and already misses two exports
 
 `grep -rl 'mock.module("@/lib/auth"' tests/` returns exactly 39 hits, re-measured 2026-09-23. Seven of
@@ -1820,13 +1717,13 @@ Not fixed there: the cache key is shared by every engine.
 
 Found 2026-09-24 in the browser while verifying #843 (PR #1106), on a connection opened with `appdata` whose tree also lists `analytics`.
 Both hold a collection called `events`.
-The tree's **Validate Collection** on `analytics > events` opens `/admin/operations?path=analytics&path=events`, and that page lists the connected database's collections, `appdata . events` among them: `getTableStats()`, `getIndexStats()` and `runMaintenance()` in `src/lib/db/providers/document/mongodb.ts` all read `this.db`, the connected database, and `runMaintenance(type, target)` takes a bare collection name.
+The tree's **Validate Collection** on `analytics > events` opens `/admin/operations?path=analytics&path=events`, and that page lists the connected database's collections, `appdata . events` among them: `getTableStats()`, `getIndexStats()` and `runMaintenance()` in `src/lib/db/providers/document/mongodb.ts` all read `this.db`, the connected database, and since #1091 `runMaintenance()` takes the row's container but refuses one that is not the connected database.
 So the row a person presses for the collection they chose is the connected database's same-named collection, which is the shape #843 removed from the query path.
 
 Not fixed in #1106, which is scoped to the statement grammar.
-The target is a bare string in `runMaintenance(type, target)`'s contract for every provider, so passing a path is the D49 change, and the monitoring tabs are session-scoped on every engine.
+Since #1091 the contract carries the container, `runMaintenance(type, target, container)`, so what is left is the provider running in a database other than the connected one, and the monitoring tabs, which are session-scoped on every engine.
 
-**Done when:** a MongoDB maintenance target names its database, the deep link either opens the collection's own database or refuses a path outside the connected one, and a test pins that `Validate` on `analytics.events` reaches `analytics`.
+**Done when:** the deep link either opens the collection's own database or refuses a path outside the connected one, and a test pins that `Validate` on `analytics.events` reaches `analytics`.
 
 ### D119. On RisingWave every column reads nullable, a `NOT NULL` column and a primary key included
 
@@ -1979,6 +1876,20 @@ A 2025-era `notifications/cancelled` sent in its own `POST` does not even stop t
 This departs from the MCP rule that a server should stop work on a cancelled request as soon as practical.
 
 **Done when:** `queryReadOnly` accepts an `AbortSignal`, each of the four providers stops the statement on abort, their provider docs say so, and `/api/mcp` passes the tool call's signal.
+
+### D129. `attachedSegment`, the object-path policy, is still a constant in each provider file rather than part of the declaration
+
+`ObjectPathShapeEngine.attachedSegment` in `src/lib/db/object-kinds.ts` (#978) decides whether an attached kind, such as a trigger on a table or an index, may also be addressed by the bare shape `[...levels, name]`.
+MySQL and Oracle set `"optional"`; the other twelve engines that reach `assertObjectPathShape` set `"required"`, each in its own descriptor constant.
+That is the shape #1147 removed for container paths: a per-engine acceptance rule that only the provider can read, which is why the kernel rule in `docs/ARCHITECTURE.md` names it as its one pre-existing exception.
+
+Measured on 2026-09-27, on `main` at ef1748e3:
+- The object routes (`describe`, `source`, `edit-plan`) check nothing about an object path's shape: `requireObjectPath` in `src/lib/api/object-route.ts` refuses only a path that is not an array of strings or is empty, so the provider is the only layer that refuses a wrong-shaped one, with `code: QUERY_ERROR`.
+- SQL Server, Trino and DuckDB do not reach `assertObjectPathShape` at all: `mssql.ts`, `trino/objects.ts` and `duckdb/objects.ts` still build the `path is [...]` sentence with a local `shapeList`.
+
+Do it after #1148 has merged, in a PR of its own, and not alongside another architectural change: the owner asked for the two to stay apart.
+
+**Done when:** which object-path shapes an engine accepts is part of its declaration, read through one kernel reader in the way `acceptedContainerShapes()` reads `containerPathShapes`; `attachedSegment` is gone from `ObjectPathShapeEngine`; the three local `shapeList` object-path sentences go through the shared renderer; the object routes refuse a path the engine does not accept by the same reader, before the provider is called; and every provider refusal sentence stays byte-identical.
 
 ## Value interpolation
 
@@ -2863,18 +2774,6 @@ Not fixed in #1113: the fixed width before it was cut at that setting too, so th
 
 **Done when:** the header width follows the root font size, either by scaling the result or by stating the constants in rem, and a test at a 20px root pins a name that is shown whole.
 
-### U50. The connection dialog carries the SSH tunnel of one connection into the next
-
-`useConnectionForm` in `src/hooks/use-connection-form.ts` loads the SSH state on an edit only when the edited connection has a tunnel (`if (editConnection.sshTunnel?.enabled)`), and its reset on close clears none of the SSH state, so the switch, the bastion's host, port and user, and its password, private key and passphrase stay in the hook from one dialog to the next.
-Reproduced 2026-09-25 with a scratch hook test, not committed: after editing a PostgreSQL connection with a tunnel and closing the dialog, `sshEnabled` was still `true` and `sshPassword` still the bastion's password, and editing a PostgreSQL connection without a tunnel then showed `sshEnabled` `true` and the first connection's `sshHost`.
-`buildConnection` writes `sshTunnel` whenever `sshEnabled` is set and the type offers the panel, so saving that second connection gives it the first one's tunnel, credentials included.
-A Kafka connection is kept out by the `offersSshTunnel` gate of `buildConnection`, and a file-based engine, whose panel `isFileBased` hides, stores the leftover tunnel inertly, because no tunnel opens for a connection without a host and port.
-
-Found 2026-09-24 while adding the Kafka connection's tunnel gate (#1088, section 6.1).
-Not fixed there: the reset is shared by every engine's dialog.
-
-**Done when:** loading an edit target sets every SSH field from it, the reset on close clears them, and a hook test edits a tunnelled connection, closes the dialog, edits one without a tunnel and finds the switch off and every SSH field empty.
-
 ### U51. The admin Operations list says "No tables found." beside an overview that counts tables
 
 `OperationsTab.tsx` in `src/components/admin/tabs/` answers an empty table list with "No tables found." whenever no `tableStatsCaption` scopes it, while the monitoring Tables tab, `TablesTab.tsx` in `src/components/monitoring/tabs/`, answers the same empty list beside an overview whose `tableCount` is above 0 with "No table statistics available." (`statsAbsent`), because the statistics are absent rather than the tables.
@@ -3150,6 +3049,48 @@ Not fixed in #1085: rewriting one paragraph in four languages is the per-languag
 
 **Done when:** each of the four paragraphs says what `README.md` says about the panel, Oracle's certificate caveat and the libSQL connection string included.
 
+### DOC8. Hand-copied source coordinates across this repository are stale by thousands of lines
+
+Found while re-deriving the two `postgres.ts` citations that this round's two added import lines
+moved. `src/lib/api/object-route.ts` is the ONLY file whose citations are guarded, by
+`tests/unit/lib/api/object-route-edit.test.ts`, which resolves each anchor and compares the number.
+Every other `file.ts:NNNN` in the repository is hand-copied prose, and a sample of nine measured at
+`64ee0e3f^` was wrong before this round touched anything:
+
+| Citation | Cited in | Anchor actually at |
+|---|---|---|
+| `postgres.ts:917` (`queryReadOnly`) | `docs/AGENT_GUIDE.md:925` | 2396 |
+| `postgres.ts:891` (`BEGIN READ ONLY`) | `docs/AGENT_ANALYST_DESIGN.md:400`, `:718` (file later deleted) | 2415 |
+| `postgres.ts:894` (`SET LOCAL statement_timeout`) | `src/lib/agent/tools.ts:1552` | 2418 |
+| `postgres.ts:2070-2074` (`{ ...baseConfig, connectionString }`) | `src/lib/db/connection-fingerprint.ts:67`, `tests/api/db/objects/edit-apply.test.ts:91`, `tests/unit/lib/db/connection-fingerprint.test.ts` x3 | 2256-2262 |
+| `postgres.ts:1241` (`pg_stat_statements extension not enabled`) | `docs/BACKLOG.md:326` | 4001 |
+| `postgres.ts:1287` (`"public." + escapeIdentifier`) | `docs/BACKLOG.md:467` | 4048 |
+| `source-applier.ts:155` (the silent-status sentence) | `tests/components/object-source/ApplyPreviewDialog.test.tsx:1092` | `whenSilent`, elsewhere |
+| `StudioWorkspace.tsx:494` (`<main className="flex-1 overflow-hidden relative">`) | `docs/BACKLOG.md:1360` | 823 |
+| `StudioWorkspace.tsx:833` (the `ObjectSourceView` mount) | `docs/BACKLOG.md:1145` | 919 |
+
+Nine of nine wrong, none of them by this round: the smallest miss is over 500 lines. A reader who
+follows one lands on an unrelated line and cannot tell a moved anchor from a deleted one, and an
+agent that re-derives its own citations after an edit, which this epic has now asked for three
+times, is paying a per-commit tax on coordinates that were never right.
+
+Two halves, and the second is what stops it recurring:
+
+1. Re-derive, or drop, every `file.ts:NNNN` outside `object-route.ts`. Dropping is often the better
+   answer: an anchor quoted as text (`queryReadOnly`, `BEGIN READ ONLY`) is grep-able for ever, while
+   a number is correct only until the next commit.
+2. Generalise the guard. `tests/unit/lib/api/object-route-edit.test.ts` already holds the whole
+   mechanism: a table of `{ as, file, anchor }` and a check that the rendered `as:line` appears in
+   the citing source. Lift it to a repository-wide test that scans for the `file.ts:NNNN` shape,
+   resolves each, and fails on a miss, so a coordinate cannot go stale silently again.
+
+DOC4 is the same class in the provider docs.
+This entry was first written as a second "D94 (proposed)" block, which reused the id of D94 and was not a heading the structure guard reads.
+
+**Done when:** a test fails on a stale `file.ts:NNNN` anywhere under `src/`, `docs/` and `tests/`,
+and the citations present at that commit all resolve. The test needs one case per shape it must
+accept, a single line, a range and a comma pair, and one negative that fails when an anchor moves.
+
 ---
 
 ## Release pipeline
@@ -3365,6 +3306,16 @@ through the anon bucket like every other `permission_denied` line.
 **Done when:** the verification-failure arm of that catch emits an audit event naming the route and
 the reason, distinct from a missing token, with the row 1.4 residual in `docs/SECURITY.md` deleted.
 
+### H14. A 500 hands the caller the raw error message, including a storage database address
+
+The generic branch at the end of `createErrorResponse()` in `src/lib/api/errors.ts` returns `error.message` verbatim for any error it does not classify.
+With `STORAGE_PROVIDER=postgres` and the database unreachable, `POST /api/auth/login` and the account routes answer `{"error":"connect ECONNREFUSED 127.0.0.1:55432"}` (measured against a local container), which tells an unauthenticated caller the internal address of the store.
+Found by the red-team pass on #1122, where the account registry made the login route depend on the store; the branch itself predates that PR and serves every route.
+
+Not fixed there because the branch is shared: some routes rely on the message reaching the caller, and changing it is a behaviour change across the API surface that needs its own audit of which errors are meant to be shown.
+
+**Done when:** an unclassified error answers a fixed message with its detail in the log only, each route that must show a driver's own message classifies that error first, and a test pins that an `ECONNREFUSED` from the store does not reach the response body.
+
 ---
 
 ## Security Phase 2 deferrals
@@ -3445,34 +3396,6 @@ a CC BY-SA database with no note connecting them.
 **Done when:** a generated `NOTICE` (or `THIRD_PARTY_LICENSES`) ships at the root of the image and the
 tarballs, names the sample database's separate terms explicitly, and is regenerated from the lockfile
 rather than hand-maintained.
-
-### C10. The last DOMPurify advisories are held open by Monaco's pin
-
-`dompurify` via `monaco-editor` is the only advisory chain that reaches a user. Everything else
-`bun audit` reports — `minimatch`, `brace-expansion`, `flatted`, `picomatch`, `esbuild`, `@babel/core`,
-`undici` — arrives through `eslint`, `typescript-eslint`, `knip`, `tsup`, `workflow` and `@ai-sdk/*`,
-and none of it is in the image. `undici` was checked specifically, because the agent runtime sits in
-`devDependencies` by design yet reaches the standalone build: building with `DOCKER_BUILD=true` shows
-no `undici` anywhere under `.next/standalone`, since `@ai-sdk/provider-utils` reaches it through a
-`createRequire` call that output tracing cannot follow.
-
-#374 moved the shipped copy from 3.2.7 to 3.4.8 by upgrading Monaco itself, clearing 14 of the 17.
-**Four remain** on GitHub Advanced Security's count, and none can be closed here: they need 3.4.9,
-3.4.11, 3.4.12 and 3.4.13. Monaco pins dompurify exactly, and 0.56.0 is its newest release.
-
-**Do not "fix" these with a `package.json` override.** Monaco ships DOMPurify inlined in its prebuilt
-`min/vs` bundle and nothing in `src/` imports the package. An override would change a lockfile entry no
-shipped code reads, leave the bundle byte-identical, and turn `bun audit` and Trivy green at once. The
-GHAS findings land on `bun.lock:<line>`, which is the tell: every one of those tools reads the
-manifest, not the artefact.
-
-Two related non-findings, so they are not re-derived. `dompurify` is dual-licensed (MPL-2.0 OR
-Apache-2.0), so the copyleft half can simply not be chosen. And the LGPL-3.0 `@img/sharp-libvips-*`
-binaries never reach the runtime image, because the runner stage copies `node_modules` selectively and
-nothing in `src/` uses `next/image`.
-
-**Done when:** Monaco ships a dompurify at or past 3.4.13. Re-check on each Monaco release, and verify
-by grepping the staged bundle for the version literal rather than trusting the lockfile.
 
 ### C11. The published SBOM carries no component for the bundled Node.js runtime
 
@@ -3757,29 +3680,11 @@ ratified package, which that test's allowed-ignore set names explicitly.
 gains the matching adapter in the same change. The `Record<LLMProviderType, AgentProviderAdapter>` will
 not compile until it does.
 
-### B4. `mapDatabaseError` discards the text that distinguishes a timeout cancel from an operator cancel
+### B4. `mapDatabaseError` classifies on a substring a table or column name can satisfy
 
-`mapDatabaseError` matches `canceling statement` before its timeout branch and returns
-`new QueryCancelledError("Query was cancelled", provider, query)`, replacing the engine's own wording.
-PostgreSQL says `canceling statement due to statement timeout` for a `statement_timeout` and
-`canceling statement due to user request` for `pg_cancel_backend`. After this mapping **no** consumer
-can tell them apart. The discriminator is gone, not merely unexamined.
-
-That is why the agent tool layer classifies a cancel as a repairable statement failure: the reachable
-case on the agent path is the timeout this layer itself installs via `SET LOCAL statement_timeout`, and
-narrowing the read is the repair that helps. The cost is stated there — an operator cancel arriving
-mid-statement is also offered a repair, so a run cancellation has to be enforced by the run loop's own
-persisted state between tool calls rather than by expecting the driver's cancel to propagate.
-
-The fix is in shared code and has editor-visible consequences, which is why it is not in #329.
-Reordering the timeout check ahead of the cancellation check, or preserving the original message on
-`QueryCancelledError`, changes what the query panel shows when a statement is cancelled versus times
-out. The reordering is the substantive one and needs the editor's cancel/timeout UX re-checked
-(`postgres.ts` sets `queryTimeout` on the pool as well, so both paths exist).
-
-**The same mapper has a wider imprecision, and the agent's repairable-versus-environment split inherits
-it.** Classification is **substring** matching on the engine's message, so an identifier can decide the
-class. Verified against the live mapper:
+`mapDatabaseError` classifies on **substring** matching of the engine's message, so an identifier can
+decide the class, and the agent's repairable-versus-environment split inherits the misdiagnosis.
+Verified against the live mapper:
 
 - `no such table: pooled_items` matches `pool` → `PoolExhaustedError`. A plainly repairable missing
   relation is treated as an environment fault and ends the run.
@@ -3793,11 +3698,9 @@ Neither direction is a boundary failure: nothing runs that policy did not allow,
 repair budgets still bound the waste. What is wrong is the diagnosis, and it is wrong before any
 consumer sees the error, so no consumer can correct it.
 
-**Done when:** a statement timeout and a user cancellation are distinguishable by type or by preserved
-message, with the editor's consumers updated and the agent's cancel classification revisited against
-the new signal — and when classification no longer depends on a substring a table or column name can
-satisfy. Driver error codes (PostgreSQL `SQLSTATE`, SQLite `errcode`) are the signal that does not
-collide, and each provider already has access to its own.
+**Done when:** classification no longer depends on a substring a table or column name can satisfy.
+Driver error codes (PostgreSQL `SQLSTATE`, SQLite `errcode`) are the signal that does not collide, and
+each provider already has access to its own.
 
 ### B5. The agent run ledger cannot fence two writers, so single ownership has to be asserted above it
 
@@ -4181,10 +4084,9 @@ and a test drives an engine whose top level exceeds the cap.
 
 Reproducible in a browser in one click. Select a depth-0 connection (SQLite), then a depth-2 one
 (DuckDB): the first request the tree issues is `POST /api/db/objects/counts` with
-`{"connectionId":"seed:t28b-duckdb","container":[]}`, which answers HTTP 400 "A DuckDB container
-path is [database] or [database, schema], received []". The tree then re-reads correctly and the
-final paint is right, so nothing is visible to the user; the 400 is in the server log on every such
-switch.
+`{"connectionId":"seed:t28b-duckdb","container":[]}`, which answers HTTP 400.
+Since #1147 the route refuses it itself, as `duckdb accepts "container" as [database] or [database, schema], received []`; before that the provider did, as "A DuckDB container path is [database] or [database, schema], received []".
+The tree then re-reads correctly and the final paint is right, so nothing is visible to the user; the 400 shows in the browser's network log on every such switch, and since #1147 it is no longer logged as a `Query error` warning by `createErrorResponse` (`src/lib/api/errors.ts`), because the route's own refusals are not.
 
 The cause is a one-commit prop skew rather than anything in the tree: `Sidebar` renders `ObjectTree`
 with `activeConnection` and `metadata`, `useProviderMetadata` clears its metadata in an EFFECT, and a

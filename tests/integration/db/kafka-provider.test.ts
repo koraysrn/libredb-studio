@@ -874,7 +874,7 @@ describe("reads over captured payloads", () => {
     });
     expect(result.warnings).toBeUndefined();
     const past = await provider.query(`{"topic":"codec-gzip","limit":${DEFAULT_QUERY_LIMIT + 1}}`).catch((e) => e);
-    expect(past).toBeInstanceOf(DatabaseConfigError);
+    expect(past).toBeInstanceOf(QueryError);
     expect(past.message).toBe(`"limit" must be a whole number from 1 to ${DEFAULT_QUERY_LIMIT}`);
   });
 
@@ -1008,19 +1008,19 @@ describe("reads over captured payloads", () => {
     expect(recorded.calls.filter(([name]) => name === "fetchV13")).toHaveLength(1);
   });
 
-  test("refusals: empty text first, an invalid request, bound params, a missing topic, an offset outside the range", async () => {
+  test("refusals: empty text first, an invalid request, bound params, a missing topic, a partition the topic does not have, an offset outside the range", async () => {
     const { provider, recorded } = await connected();
     const sent = recorded.calls.length;
     const empty = await provider.query("  \n ", [1]).catch((e) => e);
     expect(empty).toBeInstanceOf(QueryError);
     expect(empty.message).toBe('The editor is empty: write a read request such as {"topic": "orders"}');
     const invalid = await provider.query("{}").catch((e) => e);
-    expect(invalid).toBeInstanceOf(DatabaseConfigError);
+    expect(invalid).toBeInstanceOf(QueryError);
     expect(invalid.message).toContain('"topic" is required');
     // Empty text is text that is empty once whitespace is removed, and nothing more: one character
     // that is not whitespace is a request, which the parser reads and refuses.
     const oneCharacter = await provider.query(" { ").catch((e) => e);
-    expect(oneCharacter).toBeInstanceOf(DatabaseConfigError);
+    expect(oneCharacter).toBeInstanceOf(QueryError);
     expect(oneCharacter.message).toBe("The read request is not valid JSON");
     // And a request reaches the parser as written, never trimmed: a no-break space, which trim()
     // removes and JSON does not allow, before or after a request makes it text the parser refuses.
@@ -1031,7 +1031,7 @@ describe("reads over captured payloads", () => {
       ),
     );
     for (const refusal of padded) {
-      expect(refusal).toBeInstanceOf(DatabaseConfigError);
+      expect(refusal).toBeInstanceOf(QueryError);
       expect(refusal.message).toBe("The read request is not valid JSON");
     }
     // The whitespace is every character trim() removes, and no other: each alone, and all of them at
@@ -1090,6 +1090,13 @@ describe("reads over captured payloads", () => {
     // An empty parameter list binds nothing, so the request reads.
     expect((await provider.query('{"topic":"codec-gzip","from":"earliest","limit":1}', [])).rows).toHaveLength(1);
     await expect(provider.query('{"topic":"ghost"}')).rejects.toBeInstanceOf(QueryError);
+    // A partition the topic does not have is refused where the read is planned, after the topic's
+    // metadata is read and before any offset is listed (spec 5.1): the refusal names the partitions
+    // the topic has, and the class it answers as is pinned here, so a change to the error mapping
+    // cannot move it back without a failing test.
+    const notHeld = await provider.query('{"topic":"orders","partition":3}').catch((e) => e);
+    expect(notHeld).toBeInstanceOf(QueryError);
+    expect(notHeld.message).toBe('Topic "orders" has partitions 0 to 2; partition 3 does not exist');
     const pastEnd = await provider.query('{"topic":"orders","partition":1,"from":{"offset":1000}}').catch((e) => e);
     expect(pastEnd).toBeInstanceOf(QueryError);
     expect(pastEnd.message).toBe(

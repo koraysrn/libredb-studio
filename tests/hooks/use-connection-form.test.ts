@@ -63,7 +63,7 @@ mock.module("@/lib/db-ui-config", () => ({
   offersSshTunnel: (type: string) => type !== "kafka",
 }));
 
-import { useConnectionForm } from "@/hooks/use-connection-form";
+import { CONNECTION_FORM_DEFAULTS, useConnectionForm } from "@/hooks/use-connection-form";
 import { resolveAgentRunConnectionId } from "@/hooks/use-connection-payload";
 import type { DatabaseConnection, DatabaseType } from "@/lib/types";
 
@@ -299,6 +299,137 @@ describe("useConnectionForm", () => {
     expect(result.current.type).toBe("postgres");
     expect(result.current.host).toBe("localhost");
     expect(result.current.port).toBe("5432");
+  });
+
+  /**
+   * The TLS, SSH, environment and Advanced fields are connection-scoped like the
+   * credentials above (#1125): a leftover CA certificate or client key is sent with the
+   * next connection's test and saved onto it, and a leftover tunnel routes the next
+   * connection through the previous one's bastion.
+   */
+  test("closing a new connection resets its TLS, SSH, environment and Advanced fields", () => {
+    const { result, rerender } = renderHook((props) => useConnectionForm(props), {
+      initialProps: { ...defaultProps, isOpen: true },
+    });
+
+    act(() => {
+      result.current.setShowSSL(true);
+      result.current.setSSLMode("verify-full");
+      result.current.setCaCert("-----BEGIN CERTIFICATE-----ca");
+      result.current.setClientCert("-----BEGIN CERTIFICATE-----client");
+      // Opaque on purpose: a "BEGIN PRIVATE KEY" literal trips the Secret Scan.
+      result.current.setClientKey("client-key-pem");
+      result.current.setShowSSH(true);
+      result.current.setSSHEnabled(true);
+      result.current.setSSHHost("bastion.example.com");
+      result.current.setSSHPort("2222");
+      result.current.setSSHUsername("tunneluser");
+      result.current.setSSHAuthMethod("privateKey");
+      result.current.setSSHPassword("tunnel-secret");
+      result.current.setSSHPrivateKey("-----BEGIN OPENSSH PRIVATE KEY-----");
+      result.current.setSSHPassphrase("key-passphrase");
+      result.current.setEnvironment("production");
+      result.current.setShowAdvanced(true);
+      result.current.setServiceName("ORCLPDB1");
+      result.current.setInstanceName("SQLEXPRESS");
+    });
+
+    rerender({ ...defaultProps, isOpen: false });
+    rerender({ ...defaultProps, isOpen: true });
+
+    expect(result.current.showSSL).toBe(false);
+    expect(result.current.sslMode).toBe("disable");
+    expect(result.current.caCert).toBe("");
+    expect(result.current.clientCert).toBe("");
+    expect(result.current.clientKey).toBe("");
+    expect(result.current.showSSH).toBe(false);
+    expect(result.current.sshEnabled).toBe(false);
+    expect(result.current.sshHost).toBe("");
+    expect(result.current.sshPort).toBe("22");
+    expect(result.current.sshUsername).toBe("");
+    expect(result.current.sshAuthMethod).toBe("password");
+    expect(result.current.sshPassword).toBe("");
+    expect(result.current.sshPrivateKey).toBe("");
+    expect(result.current.sshPassphrase).toBe("");
+    expect(result.current.environment).toBe("local");
+    expect(result.current.showAdvanced).toBe(false);
+    expect(result.current.serviceName).toBe("");
+    expect(result.current.instanceName).toBe("");
+  });
+
+  test("the next test-connection request after a closed TLS and SSH connection carries neither", async () => {
+    const fetchMock = mockGlobalFetch({
+      "/api/db/test-connection": { ok: true, json: { success: true, latency: 5 } },
+    });
+    const { result, rerender } = renderHook((props) => useConnectionForm(props), {
+      initialProps: { ...defaultProps, isOpen: true },
+    });
+
+    act(() => {
+      result.current.setSSLMode("verify-full");
+      result.current.setCaCert("-----BEGIN CERTIFICATE-----ca");
+      result.current.setSSHEnabled(true);
+      result.current.setSSHHost("bastion.example.com");
+      result.current.setSSHUsername("tunneluser");
+      result.current.setSSHPassword("tunnel-secret");
+    });
+
+    rerender({ ...defaultProps, isOpen: false });
+    rerender({ ...defaultProps, isOpen: true });
+
+    await act(async () => {
+      await result.current.handleTestConnection();
+    });
+
+    const [body] = testConnectionBodies(fetchMock);
+    expect("ssl" in body).toBe(false);
+    expect("sshTunnel" in body).toBe(false);
+  });
+
+  /**
+   * Every field in the defaults object is reset, not only the ones named above: the
+   * object is what the reset iterates, so a field added to it is covered here without
+   * another assertion.
+   */
+  test("closing a new connection puts every field of CONNECTION_FORM_DEFAULTS back to its default", () => {
+    const { result, rerender } = renderHook((props) => useConnectionForm(props), {
+      initialProps: { ...defaultProps, isOpen: true },
+    });
+    const setterFor = (key: string) =>
+      Object.entries(result.current).find(([name]) => name.toLowerCase() === `set${key}`.toLowerCase())?.[1] as
+        | ((value: unknown) => void)
+        | undefined;
+
+    const changed: Record<string, unknown> = {
+      type: "mysql",
+      port: "3306",
+      host: "db.example.com",
+      mongoConnectionMode: "connectionString",
+      sslMode: "require",
+      sshAuthMethod: "privateKey",
+      sshPort: "2222",
+      environment: "staging",
+      saslMechanism: "PLAIN",
+    };
+    act(() => {
+      for (const [key, fallback] of Object.entries(CONNECTION_FORM_DEFAULTS)) {
+        const setter = setterFor(key);
+        expect(setter).toBeDefined();
+        const value = key in changed ? changed[key] : typeof fallback === "boolean" ? !fallback : `${key}-leftover`;
+        setter?.(value);
+      }
+    });
+    for (const key of Object.keys(CONNECTION_FORM_DEFAULTS)) {
+      expect(result.current[key as keyof typeof result.current]).not.toEqual(
+        CONNECTION_FORM_DEFAULTS[key as keyof typeof CONNECTION_FORM_DEFAULTS],
+      );
+    }
+
+    rerender({ ...defaultProps, isOpen: false });
+
+    for (const [key, value] of Object.entries(CONNECTION_FORM_DEFAULTS)) {
+      expect({ key, value: result.current[key as keyof typeof result.current] }).toEqual({ key, value });
+    }
   });
 
   /**

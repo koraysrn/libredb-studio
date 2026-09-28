@@ -1071,8 +1071,10 @@ that very measurement, which is the mistake `|| 0` was making.
 
 ## 8. Maintenance
 
-`runMaintenance(type, target?)` ([`sqlite.ts`](../../src/lib/db/providers/sql/sqlite.ts)); `analyze`
-and `reindex` targets are quoted via `escapeIdentifier()`:
+`runMaintenance(type, target?, container?)` ([`sqlite.ts`](../../src/lib/db/providers/sql/sqlite.ts)); `analyze`
+and `reindex` targets are quoted via `escapeIdentifier()`. A `container` is deliberately ignored
+(#772): SQLite resolves a bare name against the attached database it was opened on, always `main`
+for this provider, and the file has no second namespace to name.
 
 | Type | Action |
 |------|--------|
@@ -1139,6 +1141,7 @@ answers with nothing both while it is in flight and when it failed.
 | `defaultPort` | `null` |
 | `schemaRefreshPattern` | `(CREATE\|DROP\|ALTER\|TRUNCATE)\b` (from base) |
 | `containerLevels` | **`[]`** — SQLite has no container level at all, which `containerDepth()` reads as 0 ([§6.1](#61-the-object-surface-789)) |
+| `containerPathShapes` | `exact`: with no container level, only the empty path `[]` addresses a container, so any segment is refused, by the object routes over HTTP and by this provider for a caller that reaches it directly (#1147) |
 | `objectKinds` | `table`, `view`, `index`, `trigger` — no routine kind of any spelling ([§6.1](#61-the-object-surface-789)) |
 
 ### Labels
@@ -1478,4 +1481,4 @@ not apply to SQLite ([§3.4](#34-no-transactions-api-no-cancellation-no-pool)).
 - Storage-layer SQLite (the *other* SQLite — `better-sqlite3`): [`src/lib/storage/providers/sqlite.ts`](../../src/lib/storage/providers/sqlite.ts)
 - Tests: [`tests/integration/db/sqlite-provider.test.ts`](../../tests/integration/db/sqlite-provider.test.ts)
 - API contract: [`docs/API_DOCS.md`](../API_DOCS.md)
-- Sibling provider docs: [PostgreSQL](./postgres.md) · [MySQL](./mysql.md) · [Oracle](./oracle.md) · [SQL Server](./mssql.md) · [Apache Trino](./trino.md) · [Redis](./redis.md)
+- Sibling provider docs: [PostgreSQL](./postgres.md) · [MySQL](./mysql.md) · [Oracle](./oracle.md) · [SQL Server](./mssql.md) · [Trino](./trino.md) · [Redis](./redis.md)

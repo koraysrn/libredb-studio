@@ -27,12 +27,12 @@
 
 ## Overview
 
-LibreDB Studio provides a RESTful API for database management operations. The API supports PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Oracle, SQL Server, MongoDB, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra, Redis, Prometheus and Apache Kafka.
+LibreDB Studio provides a RESTful API for database management operations. The API supports PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Oracle, SQL Server, MongoDB, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Trino, Apache Cassandra, Redis, Prometheus and Apache Kafka.
 
 ### Key Features
 
 - **JWT Authentication** - Secure token-based authentication stored in HTTP-only cookies
-- **Multi-Database Support** - Eighteen engines: PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Oracle, SQL Server, MongoDB, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra, Redis, Prometheus, Apache Kafka
+- **Multi-Database Support** - Eighteen engines: PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Oracle, SQL Server, MongoDB, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Trino, Apache Cassandra, Redis, Prometheus, Apache Kafka
 - **AI-Powered Insights** - EXPLAIN explanations, query-safety analysis and schema docs, streamed
 - **Real-time Health Monitoring** - Database metrics and performance insights
 
@@ -191,7 +191,28 @@ Get current authenticated user information.
 }
 ```
 
-> The `user` object is the JWT session payload (`role`, `username`). It is a public route in the middleware but self-checks the cookie, returning `{ "authenticated": false }` when absent/invalid.
+> The `user` object is the JWT session payload (`role`, `username`, and `sessionVersion` for an account in the server store). It is a public route in the middleware but self-checks the cookie, returning `{ "authenticated": false }` when absent/invalid.
+> With `STORAGE_PROVIDER=sqlite` or `postgres` and local sign-in, a session whose stored account was disabled, deleted, demoted or password-reset since it was issued also answers `401`.
+
+#### GET /api/auth/totp
+
+The signed-in account's own second factor.
+Answers `{ "available": true, "enabled": false }` for an account in the server store, or `{ "available": false, "reason": "..." }` under OIDC or `STORAGE_PROVIDER=local`, where setup is not offered here.
+`401` without a session.
+
+#### POST /api/auth/totp
+
+Sets up or turns off the signed-in account's own authenticator; the body's `action` picks one.
+
+| `action` | Body | Answer |
+|---|---|---|
+| `begin` | `{ "password": "<current password>" }` | `{ "secret": "<base32>", "otpauthUrl": "otpauth://..." }`; `409` while a factor is already on |
+| `confirm` | `{ "code": "123456" }`, a code from the secret `begin` returned | `{ "ok": true }`; `400` for a wrong or reused code |
+| `disable` | `{ "password": "...", "code": "123456" }`; the code only while a factor is on | `{ "ok": true }` |
+
+A missing field is `400`.
+A wrong password or code is `401` and is charged to the same two budgets as a failed login, so `429` with `Retry-After` follows once either is spent.
+`409` under OIDC or `STORAGE_PROVIDER=local`. See [MFA.md](./MFA.md#when-accounts-live-in-the-server-store).
 
 ---
 
@@ -333,7 +354,11 @@ Execute SQL query on connected database.
 
 The `pagination` object reports the auto-limiting applied by the server.
 `limit` is `options.limit` when the caller sent one and 500 otherwise; the app's own tree click sends 50.
-`wasLimited` is `true` when the server injected a `LIMIT` the query didn't specify, and also when the provider bounded its own result and reported that bound on the result it returned: the Prometheus provider does so whenever it cut the result, at its series cap, at its matrix cell budget or at its result byte budget, and names each cut in a `warnings` entry (#1085, section 5.4), and the Kafka provider does so whenever its row limit left records unread or its result byte budget or its cell limit cut the result, and names the budget's and the cell limit's cuts in `warnings` entries (#1088, section 5.4).
+`wasLimited` is `true` when the server injected a `LIMIT` the query didn't specify and the returned page filled that limit, and also when the provider bounded its own result and reported that bound on the result it returned: the Prometheus provider does so whenever it cut the result, at its series cap, at its matrix cell budget or at its result byte budget, and names each cut in a `warnings` entry (#1085, section 5.4), and the Kafka provider does so whenever its row limit left records unread or its result byte budget or its cell limit cut the result, and names the budget's and the cell limit's cuts in `warnings` entries (#1088, section 5.4).
+
+A shorter result under an injected cap has `wasLimited: false`.
+Under that cap, a result of exactly `limit` rows still has `wasLimited: true` and `hasMore: true` even when the next page comes back empty, because the limiter asks for `limit` rows and not one more.
+`POST /api/db/transaction` answers a query inside a transaction by the same rule.
 
 `hasMore` is `wasLimited && rows.length === limit` with `wasLimited` read from the server's own limiter alone, and both halves matter.
 A bound the provider reported sets `wasLimited` and never `hasMore`, because no `offset` can advance a bound the server did not write.
@@ -594,7 +619,7 @@ things differ from the other SQL providers:
 
 ---
 
-##### Apache Trino Query Format
+##### Trino Query Format
 
 Trino speaks SQL over its own client protocol (`POST /v1/statement`, port `8080`), so the `sql` field
 carries a plain statement. Four things differ from the other SQL providers:
@@ -778,7 +803,8 @@ admin routes use.
     "password": "secret"
   },
   "type": "vacuum",
-  "target": "users"
+  "target": "users",
+  "container": "app"
 }
 ```
 
@@ -789,6 +815,13 @@ admin routes use.
 | `connection` | object | Yes | Database connection configuration |
 | `type` | string | Yes | Maintenance operation type |
 | `target` | string | No | Target table name or PID (for kill). Also selects the *placement* the request is validated as: absent or empty means whole-database, any name means one object |
+| `container` | string | No | The container the target lives in, as the row carries it in `schemaName`: the schema on PostgreSQL and SQL Server, the database on ClickHouse, the bucket on a document store. A non-string value (an object, a number, an array, `null`) returns `400`. Absent or empty means the request names no container and the provider falls back to its own reading of `target` |
+
+`container` is what disambiguates a target whose namespace the name alone cannot settle:
+`app.orders` and `public.orders` carry the same `target` and different `container` values, and the
+provider qualifies with it rather than splitting the name. Engines with one attached namespace
+(SQLite, libSQL, Trino's query-id `kill`) ignore it; each provider's own meaning is in
+`docs/providers/<engine>.md`. The maintenance audit event records it beside `target`.
 
 **Maintenance Types:**
 
@@ -833,7 +866,14 @@ admin routes use.
 
 The handler validates against the target provider's capabilities: `type` is required (`{ "error": "Maintenance type is required" }`), the provider must support maintenance at all, and the requested operation must be in that provider's supported set (see the matrix above) — otherwise a `400` is returned listing what the provider does support.
 
-A fourth `400` gates what the operation may be *pointed at*. Each provider declares that separately
+`container` is type-checked before any provider is opened: a value that is neither absent nor a string
+answers `{ "error": "\"container\" must be a string naming the target's container" }` with `400`.
+Without this the value reached the provider's identifier escaper, where it failed as
+`identifier.replace is not a function` and the caller read a `500` for a malformed request. An
+empty string is not malformed: it reads as a request that named no container, the same way an empty
+`target` reads as the whole-database form.
+
+A fifth `400` gates what the operation may be *pointed at*. Each provider declares that separately
 (`maintenanceOperationSpecs`, documented per engine under `docs/providers/`), and `target` selects
 which half of the declaration this request is: absent or empty is a whole-database request, a name
 is a per-object one. When the provider says that placement is not offered for this operation while
@@ -847,6 +887,40 @@ is not refused: its target is a session or query id that neither half describes 
 A `druid` connection fails the second check whatever the `type` is, with `{ "error": "Maintenance operations not supported for this database" }`: no maintenance operation is reachable from Druid SQL, so its supported set is empty by design. Compaction and retention are Coordinator and task concerns, and Druid publishes no catalog of running queries, so there is no id for `kill` to name.
 
 A `trino` connection passes it for `kill` and fails it for everything else, which is the difference between an empty supported set and a set of one: `CALL system.runtime.kill_query` really terminates a statement (verified end to end - the target then fails `ADMINISTRATIVELY_KILLED`), while vacuum, reindex, optimize, check and analyze all describe work that belongs to the connector behind a catalog rather than to the engine.
+
+#### Container paths on the object routes
+
+Four object routes take a container path, and they check it by two different rules before the provider is called (#1147).
+
+`container` on `POST /api/db/objects/counts` and `POST /api/db/objects/list`, and every entry of `containers` on `POST /api/db/objects/inventory`, is an address: the container a read binds its segments from.
+The route accepts it only in a shape the engine declares as `containerPathShapes` in its capabilities, and it reads that declaration through the same kernel function the provider refuses by, `acceptedContainerShapes()` in `src/lib/db/object-kinds.ts`.
+An `exact` engine accepts the declared depth and nothing else.
+A `prefixes` engine accepts every depth from one level up to the declared one, so on Trino a catalog alone is an address as well as a catalog and a schema.
+An engine that declares no value reads as `exact`.
+A path the engine does not accept is refused at the edge, whether it is too short or too long, with one sentence and one wire shape.
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| `container`, or one entry of `containers`, is not a shape the engine accepts | `400` | `{ "error": "<type> accepts \"<field>\" as <shapes>, received <path>" }` |
+
+The body carries no `code`, like the route's other refusals of a caller mistake, and no listing runs: on the inventory every named entry is checked before the first one is read.
+`<shapes>` spells each accepted shape from the engine's level labels, lowercased.
+A declaration with no level prints `empty` when only `[]` is accepted, and `nothing: this declaration carries no container level` when no path is.
+
+| Engine | Request field | Answer |
+|--------|---------------|--------|
+| PostgreSQL | `"container": []` | `400` `{ "error": "postgres accepts \"container\" as [schema], received []" }` |
+| PostgreSQL | `"container": ["app", "x"]` | `400` `{ "error": "postgres accepts \"container\" as [schema], received [\"app\",\"x\"]" }` |
+| PostgreSQL | `"containers": [["app"], []]` | `400` `{ "error": "postgres accepts \"containers\" as [schema], received []" }` |
+| Trino | `"container": ["memory"]` | reaches the engine |
+| Trino | `"container": ["memory", "app", "x"]` | `400` `{ "error": "trino accepts \"container\" as [catalog] or [catalog, schema], received [\"memory\",\"app\",\"x\"]" }` |
+| SQLite | `"container": ["main"]` | `400` `{ "error": "sqlite accepts \"container\" as empty, received [\"main\"]" }` |
+
+`parent` on `POST /api/db/objects/containers` is a tree cursor rather than an address, and it keeps the depth ceiling on every engine.
+Any depth up to and including the declared one is accepted, and a parent at the declared depth answers `[]`, because nothing nests below the last level.
+Only a deeper parent is refused, at `400` with `{ "error": "<type> declares a container depth of <n>, and \"parent\" has <m> segments: <path>" }`.
+
+A caller that reaches a provider without these routes, such as the MCP `inspect-schema` tool or a host behind the embedded workspace, is refused by the provider itself under the same rule, in the provider's own words: `A PostgreSQL container path is [schema], received []`.
 
 #### POST /api/db/objects/describe
 
@@ -932,9 +1006,8 @@ there.
 Build a plan for an edited object definition, and answer what an apply would send.
 It executes nothing and writes nothing.
 
-The describe route above is the one Phase 2 sibling documented in this file.
-The other six under `/api/db/objects/` (`containers`, `counts`, `list`, `search`, `inventory`,
-`source`) are not documented here yet.
+The describe route above is the one Phase 2 sibling documented in full in this file.
+The other six under `/api/db/objects/` (`containers`, `counts`, `list`, `search`, `inventory`, `source`) are not, except for the container-path rule four of them share, which [Container paths on the object routes](#container-paths-on-the-object-routes) documents.
 
 **Authentication:** Required.
 There is NO admin gate on either route, and the reason is measured rather than preferred: a
@@ -1642,7 +1715,7 @@ configuration is what failed.
 
 ### Admin API
 
-Both require an **admin** role (enforced in-handler in addition to the middleware); non-admins get `403 { "error": "Unauthorized. Admin access required." }`. `GET`/`POST /api/admin/audit` check the session inline and return that same `403` whether there is no session at all or a valid session with the wrong role — the two are not distinguished. `POST /api/admin/fleet-health` goes through the shared route guard instead and distinguishes them: no session returns `401 { "error": "Authentication required" }`, and only a valid session with a non-admin role returns the `403` above.
+Every route here requires an **admin** role (enforced in-handler in addition to the middleware); non-admins get `403 { "error": "Unauthorized. Admin access required." }`. `GET`/`POST /api/admin/audit` check the session inline and return that same `403` whether there is no session at all or a valid session with the wrong role — the two are not distinguished. `POST /api/admin/fleet-health` goes through the shared route guard instead and distinguishes them: no session returns `401 { "error": "Authentication required" }`, and only a valid session with a non-admin role returns the `403` above.
 
 #### GET /api/admin/audit
 
@@ -1653,6 +1726,21 @@ Events of type `agent_operation` come from the agent execution path (#328) and a
 #### POST /api/admin/fleet-health
 
 Body `{ "connections": [...] }`; returns per-connection health `{ "results": [{ connectionId, status, latencyMs, ... }] }`. `400` if `connections` is missing. `401` with no session, `403` with a session that is not an admin — see the note above.
+
+#### GET, POST /api/admin/accounts
+
+The local account registry, available with `STORAGE_PROVIDER=sqlite` or `postgres` and local sign-in; otherwise `409` with the reason.
+Both go through the shared route guard: `401` with no session, `403` for a non-admin.
+`GET` answers `{ "accounts": [{ "email", "role", "disabled", "totpEnabled", "createdAt" }] }` and never a hash or a secret.
+`POST` with `{ "email", "password", "role": "admin" | "user" }` creates one and answers `201 { "account": {...} }`; the password needs 8 characters, and an email that already exists in any letter case is `409`.
+
+#### PATCH, DELETE /api/admin/accounts/{email}
+
+`PATCH` takes any of `{ "role": "admin" | "user" }`, `{ "disabled": true | false }`, `{ "password": "..." }` and `{ "clearTotp": true }` and answers `{ "account": {...} }`.
+A role change, disabling and a password reset end that account's sessions and MCP tokens at their next request; when the admin changes their own account, the response re-issues their session cookie.
+`DELETE` removes the account and its stored rows and answers `{ "ok": true }`.
+Both answer `404` for an unknown email, and `409` when the change would leave no enabled admin.
+Every change, and every refused one, is an `account` event in the audit log naming the acting admin.
 
 ---
 
@@ -2125,6 +2213,7 @@ async function streamAIExplanation(query: string, explainPlan: string) {
 | `ADMIN_EMAIL` | No | Admin login email (default `admin@libredb.org`) |
 | `USER_PASSWORD` | No | Optional lower-privilege account password; the `user` account exists only when this is set |
 | `USER_EMAIL` | No | Regular-user login email (default `user@libredb.org`, only used when `USER_PASSWORD` is set) |
+| `DB_HTTP_BLOCK_PRIVATE_HOSTS` | No | Off when unset. `true`, `on`, or `1` blocks HTTP database requests to loopback, private, link-local, unique-local and selected special-use addresses; `false`, `off`, or `0` allows them. DNS answers are checked at socket connection time. Invalid values fail closed for HTTP databases. Non-HTTP drivers and SSH tunnel hosts are outside this guard; HTTP connections through an SSH tunnel are refused while it is enabled. |
 | `LLM_PROVIDER` | No | AI provider: gemini, openai, ollama, custom |
 | `LLM_API_KEY` | No | AI provider API key |
 | `LLM_MODEL` | No | AI model name |

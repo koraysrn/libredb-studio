@@ -124,7 +124,7 @@ Facts drift. Provider counts, channel counts and competitor editions all change,
 
 | Claim | Evidence | Source | Verified |
 | :--- | :--- | :--- | :--- |
-| Eighteen database engines | One reference document per engine: PostgreSQL, MySQL, Oracle, SQL Server, SQLite, libSQL, DuckDB, MongoDB, Redis, Couchbase, ClickHouse, Druid, Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra, Prometheus, Apache Kafka. A nineteenth, `libredb.md`, is the embedded provider and is not an external engine. The count is derived, not written: `SHIPPED` in `src/lib/db/compatibility.ts` is an exhaustive record over `DatabaseType`, so the compiler refuses a missing id: read the count from there, minus `libredb` | `docs/providers/`, `src/lib/db/compatibility.ts` | 2026-09-23 |
+| Eighteen database engines | One reference document per engine: PostgreSQL, MySQL, Oracle, SQL Server, SQLite, libSQL, DuckDB, MongoDB, Redis, Couchbase, ClickHouse, Druid, Elasticsearch, OpenSearch, Trino, Apache Cassandra, Prometheus, Apache Kafka. A nineteenth, `libredb.md`, is the embedded provider and is not an external engine. The count is derived, not written: `SHIPPED` in `src/lib/db/compatibility.ts` is an exhaustive record over `DatabaseType`, so the compiler refuses a missing id: read the count from there, minus `libredb` | `docs/providers/`, `src/lib/db/compatibility.ts` | 2026-09-23 |
 | Published as an embeddable npm package | `"name": "@libredb/studio"`, version 0.16.1 | `package.json` | 2026-09-19 |
 | MIT licensed | "MIT License / Copyright (c) 2025 LibreDB" | `LICENSE` | 2026-08-07 |
 | 39 distribution channels, 33 live | "39 channels · 33 live · 5 pending · 1 deprecated" | `docs/CHANNELS.md` | 2026-09-20 |

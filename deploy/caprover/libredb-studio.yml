@@ -71,7 +71,7 @@ caproverOneClickApp:
             LibreDB Studio is a modern, open-source, web-based SQL IDE for the cloud era.
             Query eighteen engines - PostgreSQL, MySQL, SQLite, libSQL, DuckDB, Oracle,
             SQL Server, MongoDB, Redis, Couchbase, ClickHouse, Apache Druid,
-            Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra, Prometheus and
+            Elasticsearch, OpenSearch, Trino, Apache Cassandra, Prometheus and
             Apache Kafka - from your browser, with an ERD viewer, schema diff and optional
             read-only AI on your own model key.
 

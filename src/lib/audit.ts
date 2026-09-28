@@ -62,7 +62,9 @@ export type AuditEventType =
   | "login_failure"
   | "logout"
   | "permission_denied"
-  | "rate_limit_exceeded";
+  | "rate_limit_exceeded"
+  /** A change to a stored local account: create, role, disable, delete, password, TOTP. */
+  | "account";
 
 /**
  * Why a reason is a closed union and never free text: it is the mechanism that makes redaction
@@ -80,6 +82,10 @@ export type AuditReason =
   | "mfa_required"
   /** A correct password, but the second factor did not verify — a wrong, expired or replayed code. */
   | "bad_totp"
+  /** A stored local account was created, changed, or removed. The verb is `action`; the subject is `target`. */
+  | "account_changed"
+  /** An admin's create, change or delete of a stored account was refused: bad input, no such account, or the last enabled admin. */
+  | "account_refused"
   | "malformed_body"
   | "no_session"
   | "insufficient_role"
@@ -187,6 +193,18 @@ export interface AuditEvent {
   type: AuditEventType;
   action: string;
   target: string;
+  /**
+   * The CONTAINER the target was addressed in, when the request named one: the schema of a
+   * PostgreSQL table, the database on ClickHouse, the bucket on a document store. It is what
+   * tells `app.orders` apart from `public.orders` in this log (#1091 review), so a maintenance
+   * row is two facts rather than one.
+   *
+   * Optional, and set only by the maintenance route: every other event's `target` already names
+   * a route rather than an object, and a field that claimed a container there would be a value
+   * its writer never meant. `toAuditLine` omits it entirely when it is unset, the way `reason`
+   * and `bucket` are omitted, so the line's shape does not grow a null.
+   */
+  container?: string;
   connectionName?: string;
   user: string;
   result: "success" | "failure";
@@ -513,6 +531,7 @@ interface AuditLogLine {
   reason?: AuditReason;
   ip?: string;
   connection?: string;
+  container?: string;
   duration_ms?: number;
   bucket?: string;
   correlation_id?: string;
@@ -531,6 +550,9 @@ function toAuditLine(event: AuditEvent): AuditLogLine {
     ...(event.reason ? { reason: event.reason } : {}),
     ...(event.ip && event.ip !== UNKNOWN_ADDRESS ? { ip: event.ip } : {}),
     ...(event.connectionName ? { connection: event.connectionName } : {}),
+    // The container beside the route, and omitted on the same terms: an event that named none
+    // must not publish a `container: null` a parser would read as a value (#1091 review).
+    ...(event.container ? { container: event.container } : {}),
     ...(event.bucket ? { bucket: event.bucket } : {}),
     ...(event.correlationId ? { correlation_id: event.correlationId } : {}),
     // Number.isFinite excludes NaN and +/-Infinity: JSON.stringify(NaN) silently produces `null`,

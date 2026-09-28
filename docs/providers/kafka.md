@@ -10,7 +10,7 @@
 | **Status** | Implemented & shipped |
 | **Database type id** | `kafka` |
 | **Family** | Stream (`src/lib/db/providers/stream/kafka/`), the first provider in that family |
-| **Driver** | `@platformatic/kafka` 2.11.0, pinned exactly, pure TypeScript, loaded under Bun and Node alike ([§2.5](#25-the-client-and-why)) |
+| **Driver** | `@platformatic/kafka` 2.12.0, pinned exactly, pure TypeScript, loaded under Bun and Node alike ([§2.5](#25-the-client-and-why)) |
 | **Query language** | `json` with `queryDialect: "kafka"`: a JSON read request of this product's own schema, not MongoDB's JSON ([§5.1](#51-the-read-request)) |
 | **Default port** | `9092`, the port a stock broker listens on; the same number is the default under TLS, because a secured listener serves on whatever port its operator chose |
 | **Connection pooling** | One `Admin`, one `Consumer` and one fetch `ConnectionPool` per connection, all closed by `disconnect()` ([§3.4](#34-one-client-per-connection-and-no-fetch-session)) |
@@ -102,7 +102,8 @@ A connect that fails after the client was built closes it again.
 
 ### 2.5 The client, and why
 
-`@platformatic/kafka` 2.11.0, used fetch-only, was chosen by a broker-side measurement before any code was written (#1088, section 3.2 and Appendix B).
+`@platformatic/kafka`, used fetch-only, was chosen at 2.11.0 by a broker-side measurement before any code was written (#1088, section 3.2 and Appendix B).
+2.12.0 was taken only after the live read-only check passed on it ([§11.4](#114-the-live-read-only-check)).
 Reading by partition, offset and timestamp through its `listOffsets`, `listOffsetsWithTimestamps` and a fetch registered no consumer group and never created `__consumer_offsets`, under Bun and Node.
 Its `consume()` in MANUAL mode, with explicit offsets and `autocommit: false`, joins the group and leaves an `Empty` group registered after `close()`, so `consume()` is never called.
 All four codecs, gzip, snappy, lz4 and zstd, decode with no native addon: snappy and lz4 come from WebAssembly, gzip and zstd from `node:zlib`, and the optional `@node-rs/crc32` falls back to WebAssembly.
@@ -286,7 +287,7 @@ An `sshTunnel` that is not an object, such as `true`, is refused the same way, a
 
 ### 5.1 The read request
 
-The editor text is one JSON object with a strict schema: an unknown key, a wrong type or a missing required key is a `DatabaseConfigError` naming the key, before any request.
+The editor text is one JSON object with a strict schema: an unknown key, a wrong type or a missing required key is a `QueryError` naming the key, before any request.
 
 ```json
 { "topic": "orders", "from": "latest", "limit": 50 }
@@ -318,7 +319,8 @@ The `from` forms:
 
 Bound `params` are refused with a `DatabaseConfigError`: there is no binding, and ignoring them would run a different read from the one the caller built.
 Text that is empty once whitespace is removed is refused with a `QueryError`, before the request is parsed.
-Invalid JSON is refused with the fixed text "The read request is not valid JSON", never the parser's message, which under Node quotes the start of the text.
+Invalid JSON is refused with a `QueryError` carrying the fixed text "The read request is not valid JSON", never the parser's message, which under Node quotes the start of the text.
+A `partition` the topic does not have is refused with a `QueryError` naming the partitions the topic has, such as `Topic "orders" has partitions 0 to 2; partition 3 does not exist`, before any offset is read.
 `supportsResultPagination` and `supportsExternalQueryLimiting` are both `false`, as on Redis and MongoDB, and `prepareQuery` is the base pass-through: the request carries its own limit.
 
 A topic click in the tree writes and runs `{"topic": <name>, "from": "latest", "limit": 50}`, the action the labels name "Read Latest 50".
@@ -549,9 +551,11 @@ Mapped from the protocol error name, the client's error code and the Node error 
 
 | Condition | Class |
 |---|---|
-| invalid request JSON, host, port, credential, SASL mechanism or TLS setting, SASL over plaintext, a credential with no mechanism, an SSH tunnel, bound params | `DatabaseConfigError`, never echoing a value |
+| host, port, credential, SASL mechanism or TLS setting, SASL over plaintext, a credential with no mechanism, an SSH tunnel, bound params | `DatabaseConfigError`, never echoing a value |
 | a package the client library requires that the installation does not resolve, at connect ([§2.5](#25-the-client-and-why)) | `DatabaseConfigError` naming the package, never the runtime's text, which carries the server's paths |
 | empty editor text | `QueryError` |
+| a read request that is invalid JSON or breaks the schema of [§5.1](#51-the-read-request) | `QueryError` |
+| a partition the topic does not have | `QueryError` naming the partitions the topic has |
 | an unknown topic ("Unknown topic <name>.") | `QueryError`: the topic does not exist |
 | an internal topic, refused by name before any request names it | `QueryError`: internal to Kafka and not readable here |
 | a partition with no leader | `QueryError` naming the leaderless partitions |
@@ -626,12 +630,24 @@ With `--tripwire` it first reads every seeded topic on a broker never asked for 
 Its log searches for an automatic topic creation and for the never-joined group id are each paired with a control that finds that kind of line in the broker's whole log.
 
 Measured on 2026-09-25: every check passed on `kafka` (57, with the tripwire), on `redpanda` (39), on `kafka-cluster` (47), and on `kafka-auth` as `reader` (7), and every snapshot after a run equalled the one before it.
+Measured again on 2026-09-28 with `@platformatic/kafka` 2.12.0: the same four counts, eight of eight with `--failover`, and every snapshot after a run equalled the one before it.
+The same day, under Node through `next start`, a connect, the topic listing and two reads on a broker never asked for a group coordinator left `__consumer_offsets` absent, and the group seed that followed created it.
 Against the provider with one rule broken at a time, the check failed each time: a `disconnect()` that closes nothing, `autocreateTopics: true`, a `metadata([])` answered from the cache, lag that ignores the committed offset, a transaction filter that keeps aborted records, a group listing without the `consumer` type, and a lag listing that shows one partition twice.
 A config write made during the run from outside the provider, setting `orders` to the `compression.type=gzip` line `codec-gzip` already holds, failed the check too; the check as first committed, which compared bare lines as a set, passed it.
 
 #### Redpanda
 
 Redpanda v26.2.2 is a full relative of this provider ([README](./README.md#wire-compatible-engines)): every surface answered, with data wherever Kafka held data, and the broker's state was unchanged by the run.
+Measured again on 2026-09-27: every check passed on `redpanda`, and the broker's state was unchanged.
+As on Kafka, Studio never produces, commits an offset, joins a group or creates a topic there ([§3.2](#32-read-only-by-construction-k4)).
+
+A Redpanda cluster is a connection of type Apache Kafka: once that type is chosen, the dialog names Redpanda as a verified relative.
+The host and port are those of a Kafka listener Redpanda advertises to where Studio runs, such as the fixture's `external` listener on 29092, because the client connects next to the advertised address, not to the one typed ([§4.4](#44-the-broker-chooses-where-studio-connects-next)).
+SASL and TLS take the fields of [§4.1](#41-configuration-fields) to [§4.3](#43-tls); the runs above used neither, and SCRAM over TLS was measured on Apache Kafka's `kafka-auth` fixture, not on Redpanda.
+Nothing was measured on Redpanda Cloud (Serverless, BYOC or Dedicated), so no claim here covers it.
+
+Measured in a browser against the published `@libredb/studio@0.17.0` on 2026-09-27: the tree listed the topics, consumer groups and brokers, a topic click read its latest records, and a group's committed offsets and lag equalled the broker's own `rpk`.
+
 Four things read differently from Kafka.
 Max connections reads 0, no limit published, because Redpanda's DescribeConfigs answer for a broker holds no `max.connections`.
 That answer holds nine entries where Kafka 4.3.1's holds 340, so a broker's source is short.
@@ -719,7 +735,7 @@ See [`docs/API_DOCS.md`](../API_DOCS.md) for the full request and response contr
 
 - Source: [`src/lib/db/providers/stream/kafka/`](../../src/lib/db/providers/stream/kafka/)
 - Design: [#1088](https://github.com/libredb/libredb-studio/issues/1088)
-- Client: [`@platformatic/kafka`](https://github.com/platformatic/kafka), version 2.11.0
+- Client: [`@platformatic/kafka`](https://github.com/platformatic/kafka), version 2.12.0
 - Kafka protocol: <https://kafka.apache.org/protocol>
 - KIP-848, the consumer group protocol: <https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol>
 - KIP-516, topic identifiers: <https://cwiki.apache.org/confluence/display/KAFKA/KIP-516%3A+Topic+Identifiers>

@@ -640,6 +640,30 @@ export interface ProviderCapabilities {
    */
   containerLevels?: ContainerLevels;
   /**
+   * Which container paths this engine accepts as an ADDRESS, beside `containerLevels` (#1147).
+   *
+   * `exact` accepts only the declared depth: every declared level is named, or the path is
+   * refused. `prefixes` accepts every depth from one level up to the declared one, because on
+   * those engines a container named by its outer levels alone is a real address: a catalog with no
+   * schema on Trino, a database with no schema on SQL Server and DuckDB, a bucket with no scope on
+   * Couchbase. Both refuse a path longer than the declaration.
+   *
+   * Absent reads as `exact`, the conservative answer. Read as `prefixes`, a provider that forgot
+   * the field would let a partial path reach a read that binds its segments by position, and
+   * `undefined` bound where a segment belongs answers an empty folder that looks exactly like a
+   * container holding nothing.
+   *
+   * Read it through `acceptedContainerShapes()` in `src/lib/db/object-kinds.ts` and never
+   * directly, so the provider's own refusal (`assertContainerPathShape`) and the HTTP object routes
+   * in `src/lib/api/object-route.ts` apply one rule to one declaration. It governs an address, the
+   * `container` a count or a listing names; the `parent` a container listing starts from is a tree
+   * cursor and keeps the depth ceiling on every engine.
+   *
+   * Optional for the same published-interface reason as `containerLevels` (`src/exports/types.ts`):
+   * a required field added after the fact stops every external implementer compiling.
+   */
+  containerPathShapes?: "exact" | "prefixes";
+  /**
    * Every object kind this engine has, each declared in full by the provider that has
    * it (#789).
    *
@@ -1243,8 +1267,13 @@ export interface DatabaseProvider {
    * Run maintenance operations
    * @param type - Type of maintenance operation
    * @param target - Optional target (table name or process ID)
+   * @param container - Optional namespace the target lives in. What a container means is
+   * per-engine and the provider decides: a schema for PostgreSQL, DuckDB and SQL Server, a
+   * database for MySQL and ClickHouse, an owner for Oracle, a bucket or scope for Couchbase,
+   * the attached database for SQLite and libSQL. Providers that cannot act on one ignore it
+   * rather than guessing a dialect from the target string.
    */
-  runMaintenance(type: MaintenanceType, target?: string): Promise<MaintenanceResult>;
+  runMaintenance(type: MaintenanceType, target?: string, container?: string): Promise<MaintenanceResult>;
 
   /**
    * Validate provider configuration
@@ -1522,9 +1551,10 @@ export interface MonitoringData {
    * which is a different fact from an empty array or a zero - StarRocks 3.3 has no
    * `information_schema.PROCESSLIST`, so `activeSessions` is absent there while an idle
    * PostgreSQL answers `[]`. Rendering the first as the second would claim a measurement
-   * the engine refused to make (the very error QueriesTab.tsx:68 documents for
-   * `slowQueries`). A consumer therefore gates on the field being present, and shows the
-   * `errors` entry in place of that panel.
+   * the engine refused to make (the very error `QueriesTab` in
+   * `src/components/monitoring/tabs/QueriesTab.tsx` documents for `slowQueries`). A
+   * consumer therefore gates on the field being present, and shows the `errors` entry in
+   * place of that panel.
    */
   overview?: DatabaseOverview;
   performance?: PerformanceMetrics;
@@ -1619,7 +1649,9 @@ export interface ObjectKindSpec {
    * role would never withhold a twisty a relation deserved; it would withhold those five and
    * grant one it should not. Oracle's `sequence` is that one, and it is the case that settles the
    * whole question: same kind id as PostgreSQL's, opposite answer, because that provider gates on
-   * the role (`oracle.ts:2000`) and PostgreSQL gates on `RELKIND_BY_KIND` (`postgres.ts:2970`).
+   * the role in `OracleProvider.describeObject()` (`src/lib/db/providers/sql/oracle.ts`) and
+   * PostgreSQL gates on `RELKIND_BY_KIND` in `PostgresProvider.describeObject()`
+   * (`src/lib/db/providers/sql/postgres.ts`).
    * A rule written above the providers is wrong for at least one engine whichever way it is
    * written, so the provider declares and nothing else decides.
    *
@@ -1993,10 +2025,10 @@ export type ObjectPartEdit = { readonly offered: true } | { readonly offered: fa
  *
  * CLOSED rather than an open string, against this repository's own precedent for
  * `ObjectKindSpec.id`, and the cost is that a host whose engine has a seventh mechanism has
- * nothing to name. It is closed anyway because `src/lib/db/operations/execution.ts:21-26` states
- * the audit's rule, that "the audited action is the registry-RESOLVED descriptor id, never the
- * caller's raw operation string", and this value is what an apply's audit event carries in
- * `action`.
+ * nothing to name. It is closed anyway because the module docblock in
+ * `src/lib/db/operations/execution.ts` states the audit's rule, that "the audited action is the
+ * registry-RESOLVED descriptor id, never the caller's raw operation string", and this value is
+ * what an apply's audit event carries in `action`.
  *
  * NOTHING IN `src/lib/db` OR IN CORE MAY SWITCH ON IT. Three things read it: the preview
  * caption, the audit's `action`, and the census. A member with no producer is therefore not a
@@ -2227,14 +2259,14 @@ export interface ObjectEditPlan {
   /**
    * A digest of the SERVER this plan was built against, not of the connection's id.
    *
-   * MEASURED, `src/lib/seed/resolve-connection.ts:21-23` returns an inline connection object
-   * verbatim, `id` included, and the browser drove it: a made-up id with different credentials
-   * connected as them. So `connection.id` is a string the caller typed on the majority path, and
-   * binding to it would be vacuous for exactly the case the binding exists for. The fingerprint
-   * is a hash over a length-framed walk of the RESOLVED connection's `type`, `host`, `port`,
-   * `database` and `user`, which are the fields that decide which server and which principal.
-   * Stated as a limit rather than left to be discovered: it does not catch a different server
-   * that answers on the same host and port.
+   * MEASURED, `resolveConnection()` in `src/lib/seed/resolve-connection.ts` returns a non-seed
+   * inline connection object verbatim, `id` included, and the browser drove it: a made-up id with
+   * different credentials connected as them. So `connection.id` is a string the caller typed on the
+   * majority path, and binding to it would be vacuous for exactly the case the binding exists for.
+   * The fingerprint is a hash over a length-framed walk of the RESOLVED connection's `type`,
+   * `host`, `port`, `database` and `user`, which are the fields that decide which server and which
+   * principal. Stated as a limit rather than left to be discovered: it does not catch a different
+   * server that answers on the same host and port.
    */
   readonly connectionFingerprint: string;
   readonly type: DatabaseType;
@@ -2434,10 +2466,16 @@ export type ObjectEditOutcome =
    * wraps its own transaction. `"rolled-back"` may be claimed ONLY by a provider that opened and
    * closed the transaction itself, which is `transactional-replace`.
    *
-   * There is NO `retryable` field on this type and no retry advice in it. MEASURED: a PostgreSQL
-   * DDL timeout answers HTTP 499 `QUERY_CANCELLED` "Query was cancelled", and Trino mints a
-   * `TimeoutError` directly (`trino/index.ts:680`) which the generic mapper answers 408
-   * `retryable: true`. A client that retries an apply whose disposition is unknown applies twice.
+   * There is NO `retryable` field on this type and no retry advice in it. MEASURED on the general
+   * query path (`POST /api/db/query`), which routes through `mapDatabaseError`: since #1145 a
+   * PostgreSQL statement timeout answers HTTP 408 `TIMEOUT_ERROR` `retryable: true`, the same as
+   * Trino, which mints a `TimeoutError` directly (`TrinoProvider.mapTrinoError()` in
+   * `src/lib/db/providers/sql/trino/index.ts`). The apply route
+   * (`edit-apply/route.ts`) deliberately does NOT inherit that 408: it always answers 200 and never
+   * carries a `retryable` flag, because a client that retries an apply whose disposition is unknown
+   * applies twice. A PostgreSQL apply-time timeout does not even reach this `interrupted` arm —
+   * `classifyApplyFailure` reads its SQLSTATE `57014`, which is not in `APPLY_VERDICT_BY_SQLSTATE`,
+   * so `verdict` is `undefined` and the outcome is `refused` with the `definition` class.
    */
   | {
       readonly outcome: "interrupted";

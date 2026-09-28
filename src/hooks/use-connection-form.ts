@@ -111,6 +111,74 @@ function preservedFields<T extends object>(
   return carried;
 }
 
+/**
+ * The connection-scoped fields of a new connection, as the dialog first shows them.
+ *
+ * One object both seeds the state and drives the reset on close (#1125), so a field
+ * added here cannot be left out of the reset: the reset walks a setter map whose type is
+ * mapped over `keyof typeof CONNECTION_FORM_DEFAULTS`, which fails `bun run typecheck`
+ * until the new field has a setter. Before this object the reset was a hand-kept list,
+ * and it missed the TLS, SSH, environment and Advanced fields, so the next new
+ * connection was tested and saved with the previous one's certificates and tunnel.
+ *
+ * The transient dialog state (`testResult`, the paste input, the degraded-save
+ * acknowledgement) is not here: it resets on every close, edit mode included.
+ */
+export const CONNECTION_FORM_DEFAULTS = {
+  type: "postgres" as DatabaseType,
+  name: "",
+  host: "localhost",
+  port: "5432",
+  user: "",
+  password: "",
+  database: "",
+  schema: "",
+  queryTimeout: "",
+  connectionString: "",
+  mongoConnectionMode: "host" as "host" | "connectionString",
+  environment: "local" as ConnectionEnvironment,
+  // SSL/TLS
+  showSSL: false,
+  sslMode: "disable" as SSLMode,
+  caCert: "",
+  clientCert: "",
+  clientKey: "",
+  // Advanced (Oracle/MSSQL)
+  showAdvanced: false,
+  serviceName: "",
+  instanceName: "",
+  // Cassandra topology, so a leftover is not cosmetic: the next new connection would
+  // dial its host with the previous ring's data centre, which the driver either refuses
+  // or - when the name exists on both rings - accepts as a silently wrong topology.
+  localDataCenter: "",
+  // A leftover auth database sends the next connection's credentials to a database
+  // that may not hold them, which reads as a wrong password.
+  authSource: "",
+  // A leftover key pair would authenticate the next connection - a different cluster,
+  // possibly a different owner's - as a principal nobody chose for it.
+  apiKeyId: "",
+  apiKeySecret: "",
+  // A leftover mechanism would send the next connection's credentials by a mechanism
+  // nobody chose for it, which the broker answers as a failed login.
+  saslMechanism: "" as NonNullable<DatabaseConnection["saslMechanism"]> | "",
+  // A leftover choice would open the next connection with no object list and no
+  // explanation, which reads as an engine that answered nothing.
+  skipObjectScan: false,
+  // SSH tunnel. A leftover tunnel sends the next connection through the previous one's
+  // bastion, with that bastion's password or private key.
+  showSSH: false,
+  sshEnabled: false,
+  sshHost: "",
+  sshPort: "22",
+  sshUsername: "",
+  sshAuthMethod: "password" as "password" | "privateKey",
+  sshPassword: "",
+  sshPrivateKey: "",
+  sshPassphrase: "",
+};
+
+type ConnectionFormDefaults = typeof CONNECTION_FORM_DEFAULTS;
+
 interface UseConnectionFormProps {
   isOpen: boolean;
   onClose: () => void;
@@ -159,19 +227,20 @@ function degradedSentence(result: TestOutcome): string {
 type TestResultTone = "success" | "warning" | "error";
 
 export function useConnectionForm({ isOpen, onConnect, editConnection, onTestConnection }: UseConnectionFormProps) {
-  const [type, setType] = useState<DatabaseType>("postgres");
-  const [name, setName] = useState("");
-  const [host, setHost] = useState("localhost");
-  const [port, setPort] = useState("5432");
-  const [user, setUser] = useState("");
-  const [password, setPassword] = useState("");
-  const [database, setDatabase] = useState("");
-  const [schema, setSchema] = useState("");
-  const [queryTimeout, setQueryTimeout] = useState("");
+  const D = CONNECTION_FORM_DEFAULTS;
+  const [type, setType] = useState<DatabaseType>(D.type);
+  const [name, setName] = useState(D.name);
+  const [host, setHost] = useState(D.host);
+  const [port, setPort] = useState(D.port);
+  const [user, setUser] = useState(D.user);
+  const [password, setPassword] = useState(D.password);
+  const [database, setDatabase] = useState(D.database);
+  const [schema, setSchema] = useState(D.schema);
+  const [queryTimeout, setQueryTimeout] = useState(D.queryTimeout);
   const [isTesting, setIsTesting] = useState(false);
-  const [connectionString, setConnectionString] = useState("");
-  const [mongoConnectionMode, setMongoConnectionMode] = useState<"host" | "connectionString">("host");
-  const [environment, setEnvironment] = useState<ConnectionEnvironment>("local");
+  const [connectionString, setConnectionString] = useState(D.connectionString);
+  const [mongoConnectionMode, setMongoConnectionMode] = useState<"host" | "connectionString">(D.mongoConnectionMode);
+  const [environment, setEnvironment] = useState<ConnectionEnvironment>(D.environment);
   const [testResult, setTestResult] = useState<{ tone: TestResultTone; message: string; latency?: number } | null>(
     null,
   );
@@ -181,31 +250,31 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
   const [degradedSaveAcknowledged, setDegradedSaveAcknowledged] = useState(false);
 
   // SSL/TLS
-  const [showSSL, setShowSSL] = useState(false);
-  const [sslMode, setSSLMode] = useState<SSLMode>("disable");
-  const [caCert, setCaCert] = useState("");
-  const [clientCert, setClientCert] = useState("");
-  const [clientKey, setClientKey] = useState("");
+  const [showSSL, setShowSSL] = useState(D.showSSL);
+  const [sslMode, setSSLMode] = useState<SSLMode>(D.sslMode);
+  const [caCert, setCaCert] = useState(D.caCert);
+  const [clientCert, setClientCert] = useState(D.clientCert);
+  const [clientKey, setClientKey] = useState(D.clientKey);
 
   // Advanced (Oracle/MSSQL)
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [serviceName, setServiceName] = useState("");
-  const [instanceName, setInstanceName] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(D.showAdvanced);
+  const [serviceName, setServiceName] = useState(D.serviceName);
+  const [instanceName, setInstanceName] = useState(D.instanceName);
   // Cassandra's required data centre. NOT behind the Advanced accordion that holds
   // the two above: `cassandra-driver` refuses to connect without it, so a hidden
   // field would be a connection nobody could open.
-  const [localDataCenter, setLocalDataCenter] = useState("");
+  const [localDataCenter, setLocalDataCenter] = useState(D.localDataCenter);
   // MongoDB's auth database. In the open for the same reason as the field above: it is
   // what the ordinary deployment (users in `admin`) cannot connect without.
-  const [authSource, setAuthSource] = useState("");
+  const [authSource, setAuthSource] = useState(D.authSource);
   // Elasticsearch's API key pair (#708). Two fields, not one: an id and a secret are a
   // generated pair, never typed together as one string, and Kibana itself shows them
   // that way under its "Beats"/"Logstash" format.
-  const [apiKeyId, setApiKeyId] = useState("");
-  const [apiKeySecret, setApiKeySecret] = useState("");
+  const [apiKeyId, setApiKeyId] = useState(D.apiKeyId);
+  const [apiKeySecret, setApiKeySecret] = useState(D.apiKeySecret);
   // Kafka's SASL mechanism (#1088), chosen from the select its UI entry declares; "" is the
   // select's None, which writes no mechanism at all.
-  const [saslMechanism, setSaslMechanism] = useState<NonNullable<DatabaseConnection["saslMechanism"]> | "">("");
+  const [saslMechanism, setSaslMechanism] = useState<ConnectionFormDefaults["saslMechanism"]>(D.saslMechanism);
   /**
    * Read no catalog when this connection opens (#765).
    *
@@ -213,18 +282,59 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
    * of them can hold an owner too big to scan on connect, so this is not gated on `type`
    * and is not behind the Advanced accordion.
    */
-  const [skipObjectScan, setSkipObjectScan] = useState(false);
+  const [skipObjectScan, setSkipObjectScan] = useState(D.skipObjectScan);
 
   // SSH Tunnel
-  const [showSSH, setShowSSH] = useState(false);
-  const [sshEnabled, setSSHEnabled] = useState(false);
-  const [sshHost, setSSHHost] = useState("");
-  const [sshPort, setSSHPort] = useState("22");
-  const [sshUsername, setSSHUsername] = useState("");
-  const [sshAuthMethod, setSSHAuthMethod] = useState<"password" | "privateKey">("password");
-  const [sshPassword, setSSHPassword] = useState("");
-  const [sshPrivateKey, setSSHPrivateKey] = useState("");
-  const [sshPassphrase, setSSHPassphrase] = useState("");
+  const [showSSH, setShowSSH] = useState(D.showSSH);
+  const [sshEnabled, setSSHEnabled] = useState(D.sshEnabled);
+  const [sshHost, setSSHHost] = useState(D.sshHost);
+  const [sshPort, setSSHPort] = useState(D.sshPort);
+  const [sshUsername, setSSHUsername] = useState(D.sshUsername);
+  const [sshAuthMethod, setSSHAuthMethod] = useState<"password" | "privateKey">(D.sshAuthMethod);
+  const [sshPassword, setSSHPassword] = useState(D.sshPassword);
+  const [sshPrivateKey, setSSHPrivateKey] = useState(D.sshPrivateKey);
+  const [sshPassphrase, setSSHPassphrase] = useState(D.sshPassphrase);
+
+  // Every connection-scoped setter, keyed like the defaults. A mapped type over the defaults'
+  // keys, so a field added to CONNECTION_FORM_DEFAULTS without a setter here fails the
+  // typecheck instead of silently surviving the reset below.
+  const resetSetters: { [K in keyof ConnectionFormDefaults]: (value: ConnectionFormDefaults[K]) => void } = {
+    type: setType,
+    name: setName,
+    host: setHost,
+    port: setPort,
+    user: setUser,
+    password: setPassword,
+    database: setDatabase,
+    schema: setSchema,
+    queryTimeout: setQueryTimeout,
+    connectionString: setConnectionString,
+    mongoConnectionMode: setMongoConnectionMode,
+    environment: setEnvironment,
+    showSSL: setShowSSL,
+    sslMode: setSSLMode,
+    caCert: setCaCert,
+    clientCert: setClientCert,
+    clientKey: setClientKey,
+    showAdvanced: setShowAdvanced,
+    serviceName: setServiceName,
+    instanceName: setInstanceName,
+    localDataCenter: setLocalDataCenter,
+    authSource: setAuthSource,
+    apiKeyId: setApiKeyId,
+    apiKeySecret: setApiKeySecret,
+    saslMechanism: setSaslMechanism,
+    skipObjectScan: setSkipObjectScan,
+    showSSH: setShowSSH,
+    sshEnabled: setSSHEnabled,
+    sshHost: setSSHHost,
+    sshPort: setSSHPort,
+    sshUsername: setSSHUsername,
+    sshAuthMethod: setSSHAuthMethod,
+    sshPassword: setSSHPassword,
+    sshPrivateKey: setSSHPrivateKey,
+    sshPassphrase: setSSHPassphrase,
+  };
 
   const isEditMode = !!editConnection;
 
@@ -333,35 +443,10 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       // The next connection typed into this dialog has not been warned about anything.
       setDegradedSaveAcknowledged(false);
       if (!editConnection) {
-        setName("");
-        setUser("");
-        setPassword("");
-        setDatabase("");
-        setSchema("");
-        setQueryTimeout("");
-        setConnectionString("");
-        setMongoConnectionMode("host");
-        setType("postgres");
-        setHost("localhost");
-        setPort("5432");
-        // Cassandra topology, so a leftover is not cosmetic: the next new connection
-        // would dial its host with the previous ring's data centre, which the driver
-        // either refuses or - when the name exists on both rings - accepts as a
-        // silently wrong topology.
-        setLocalDataCenter("");
-        // A leftover auth database sends the next connection's credentials to a
-        // database that may not hold them, which reads as a wrong password.
-        setAuthSource("");
-        // A leftover key pair would authenticate the next connection - a different
-        // cluster, possibly a different owner's - as a principal nobody chose for it.
-        setApiKeyId("");
-        setApiKeySecret("");
-        // A leftover mechanism would send the next connection's credentials by a mechanism
-        // nobody chose for it, which the broker answers as a failed login.
-        setSaslMechanism("");
-        // A leftover choice would open the next connection with no object list and no
-        // explanation, which reads as an engine that answered nothing.
-        setSkipObjectScan(false);
+        // Every connection-scoped field, from the same object that seeded it (#1125).
+        for (const key of Object.keys(CONNECTION_FORM_DEFAULTS) as (keyof ConnectionFormDefaults)[]) {
+          (resetSetters[key] as (value: ConnectionFormDefaults[typeof key]) => void)(CONNECTION_FORM_DEFAULTS[key]);
+        }
       }
     }
   }

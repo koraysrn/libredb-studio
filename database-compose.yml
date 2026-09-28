@@ -600,7 +600,7 @@ services:
   # ---------------------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------------------
-  # Apache Trino (issue #424, Phase 2). One container is the whole cluster: the coordinator
+  # Trino (issue #424, Phase 2). One container is the whole cluster: the coordinator
   # runs the worker in-process by default, which is enough to answer every statement the
   # provider sends. Nothing else is needed to exercise it.
   # ---------------------------------------------------------------------------------------
