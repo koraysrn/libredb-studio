@@ -310,7 +310,14 @@ mock.module("@/components/DataProfiler", () => ({ DataProfiler: () => null }));
 mock.module("@/components/CodeGenerator", () => ({ CodeGenerator: () => null }));
 mock.module("@/components/TestDataGenerator", () => ({ TestDataGenerator: () => null }));
 mock.module("@/components/CreateTableModal", () => ({ CreateTableModal: () => null }));
-mock.module("@/components/SaveQueryModal", () => ({ SaveQueryModal: () => null }));
+/** The Save dialog's `defaultQuery`, which the shell hands the ACTIVE tab's query on every render. */
+let savedDefaultQuery: string | undefined;
+mock.module("@/components/SaveQueryModal", () => ({
+  SaveQueryModal: (props: { defaultQuery?: string }) => {
+    savedDefaultQuery = props.defaultQuery;
+    return null;
+  },
+}));
 mock.module("@/components/agent/AgentRail", () => ({
   AgentRail: (props: Record<string, unknown>) => {
     capturedAgentRailProps = props;
@@ -366,7 +373,8 @@ const { default: Studio } = await import("@/components/Studio");
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DatabaseObject } from "@/lib/db/types";
-import { StudioTabBar, type StudioTabSummary } from "@/components/studio/StudioTabBar";
+import { StudioTabBar } from "@/components/studio/StudioTabBar";
+import type { StudioTabSummary } from "@/hooks/use-tab-summaries";
 import type { TreeRowActionHandlers } from "@/components/object-tree/row-actions";
 
 const ROUTINE: DatabaseObject = { path: ["app", "order_total(integer)"], name: "order_total", kind: "function" };
@@ -505,6 +513,7 @@ function tabNames(): string[] {
 }
 
 beforeEach(() => {
+  savedDefaultQuery = undefined;
   localStorage.clear();
   capturedSidebarProps = {};
   capturedPaletteProps = {};
@@ -1102,9 +1111,15 @@ const WITH_EDIT_DECLARATION = KINDS.map((kind) =>
   kind.id === "function" ? { ...kind, acceptsSourceEdits: true } : kind,
 );
 
-/** The active tab's query, read through the panel's stable explain getter (X5). */
+/**
+ * The active tab's query, read off the Save dialog's `defaultQuery`: the shell hands that
+ * prop the active tab's query on every render, and it is a prop the product already has, so
+ * reading it adds no seam. The panel is no longer handed the statement outside the explain
+ * view (X5), and the mobile header no longer receives it at all.
+ */
 function activeQuery(): string {
-  return (capturedBottomPanelProps.getExplainQuery as () => string)();
+  if (savedDefaultQuery === undefined) throw new Error("the Save dialog was never rendered");
+  return savedDefaultQuery;
 }
 
 /** The states the addressed Source tab's `source` passed through, in viewer-render order. */

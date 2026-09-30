@@ -580,12 +580,15 @@ describe("the embedded workspace reads an object's source through the host", () 
      * OTHER tab.
      *
      * BottomPanel is no longer handed the whole tab (X5), so the Source tab's ADDRESS is read off
-     * the viewer's own `path` prop and the empty query off the panel's stable explain getter. The
-     * pane above showing the definition is what proves the active tab is the Source tab, so an
-     * empty query here cannot be some other tab's.
+     * the viewer's own `path` prop, and the query off the statement the panel is handed while its
+     * explain view is open, which is the only view it is handed in. The pane above showing the
+     * definition is what proves the active tab is the Source tab, so an empty query here cannot
+     * be some other tab's.
      */
     expect(capturedSourceViewProps.path).toEqual(ROUTINE.path);
-    expect((capturedBottomPanelProps.getExplainQuery as () => string)()).toBe("");
+    act(() => (capturedBottomPanelProps.onSetMode as (mode: string) => void)("explain"));
+    await waitFor(() => expect(capturedBottomPanelProps.mode).toBe("explain"));
+    expect(capturedBottomPanelProps.explainQuery).toBe("");
   });
 
   test("a kind that declares no source is offered nothing and activates nothing", async () => {

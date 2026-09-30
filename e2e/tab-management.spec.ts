@@ -52,8 +52,9 @@ test.describe("Tab Management", () => {
     await expect(page.getByRole("tab", { name: "Query 1" })).toBeVisible();
   });
 
-  // The editor's text lives in Monaco's model, not the DOM, so it is written and read
-  // through the global `monaco` handle, the same way the other e2e files do.
+  // Typed with the keyboard, the way a user writes a statement, so the text reaches the tab
+  // through the editor's own change path. It is read back through the global `monaco`
+  // handle, because the text lives in Monaco's model rather than in the DOM.
   async function typeInEditor(page: Page, sql: string): Promise<void> {
     await expect(page.locator(".monaco-editor").first()).toBeVisible({ timeout: 15_000 });
     await page.waitForFunction(
@@ -61,13 +62,11 @@ test.describe("Tab Management", () => {
         ((window as unknown as { monaco?: { editor: { getEditors(): unknown[] } } }).monaco?.editor.getEditors()
           .length ?? 0) > 0,
     );
-    await page.evaluate((query) => {
-      const monaco = (
-        window as unknown as { monaco?: { editor: { getEditors(): { setValue(value: string): void }[] } } }
-      ).monaco;
-      if (!monaco) throw new Error("monaco global not found");
-      monaco.editor.getEditors()[0].setValue(query);
-    }, sql);
+    await page.locator(".monaco-editor .view-lines").first().click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.press("Delete");
+    await page.keyboard.type(sql);
+    await page.keyboard.press("Escape");
   }
 
   async function editorValue(page: Page): Promise<string> {
@@ -92,8 +91,10 @@ test.describe("Tab Management", () => {
 
   test("a statement typed into the editor survives a reload", async ({ page }) => {
     await typeInEditor(page, "SELECT 43");
-    // The workspace save is debounced (500ms); give it time before the reload.
-    await page.waitForTimeout(2000);
+    // The workspace save is debounced; reload only once the statement has been written.
+    await expect
+      .poll(() => page.evaluate(() => Object.values(localStorage).some((value) => value.includes("SELECT 43"))))
+      .toBe(true);
     await page.reload();
     await expect(page.locator(".monaco-editor").first()).toBeVisible({ timeout: 15_000 });
     await page.waitForFunction(

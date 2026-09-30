@@ -189,9 +189,9 @@ function createDefaultProps(overrides: Partial<Record<string, unknown>> = {}) {
     onSetMode: mock(() => {}),
     result: tab.result ?? null,
     explainPlan: tab.explainPlan,
-    // The panel reads the editor's statement through a stable getter at the point the
-    // explain view needs it (X5), never as a live string prop.
-    getExplainQuery: () => tab.query ?? "SELECT 1",
+    // The shell hands the statement only while the explain view is open (X5); a fixture
+    // passes it regardless, since the panel reads it only in that view.
+    explainQuery: tab.query ?? "SELECT 1",
     resultQuery: tab.resultQuery,
     runError: tab.runError,
     schema: [],

@@ -2657,12 +2657,30 @@ describe("Studio", () => {
     expect(changed(rail, capturedAgentRailProps)).toEqual([]);
     expect(changed(toolbar, capturedQueryToolbarProps)).toEqual([]);
     // The three children the shell hands the keystroke's own state to: the bar receives a
-    // summary array keyed on the fields it draws, the panel receives granular fields plus a
-    // stable explain-query getter, and the header receives stable handlers (X5). A keystroke
+    // summary array keyed on the fields it draws, the panel receives granular fields and no
+    // statement outside the explain view, and the header receives stable handlers (X5). A keystroke
     // that only rewrites the query must hand all three the SAME props.
     expect(changed(tabBar, capturedTabBarProps)).toEqual([]);
     expect(changed(bottomPanel, capturedBottomPanelProps)).toEqual([]);
     expect(changed(mobileHeader, capturedMobileHeaderProps)).toEqual([]);
+  });
+
+  /*
+   * The explain view pairs the editor's statement with the plan it shows, so the panel is
+   * handed the statement while that view is open, and only then: outside it the statement
+   * would be a prop that changes on every keystroke and re-renders the memoized panel (X5).
+   */
+  test("the panel is handed the tab's statement in the explain view and not in any other", async () => {
+    const tab = { id: "tab-1", name: "Query 1", query: "SELECT 7", result: null, isExecuting: false, type: "sql" };
+    tabMgrOverride = { tabs: [tab], currentTab: tab };
+    queryExecOverride = { bottomPanelMode: "explain" };
+    const { rerender } = render(<Studio />);
+    await waitFor(() => expect(capturedBottomPanelProps.explainQuery).toBe("SELECT 7"));
+
+    queryExecOverride = { bottomPanelMode: "results" };
+    rerender(<Studio />);
+    expect(capturedBottomPanelProps.mode).toBe("results");
+    expect(capturedBottomPanelProps.explainQuery).toBeUndefined();
   });
 
   test("below md the mobile nav opens the rail as a sheet", async () => {

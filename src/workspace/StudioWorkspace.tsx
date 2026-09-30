@@ -23,7 +23,7 @@ import { findKind, kindHasSource, relationKindIds } from "@/lib/db/object-kinds"
 import { objectPathLabel } from "@/lib/db/object-path";
 import { useToast } from "@/hooks/use-toast";
 import { useTabManager } from "@/hooks/use-tab-manager";
-import { useStableCallback } from "@/hooks/use-stable-callback";
+import { useTabSummaries } from "@/hooks/use-tab-summaries";
 import { useConnectionAdapter } from "@/workspace/hooks/use-connection-adapter";
 import { useQueryAdapter } from "@/workspace/hooks/use-query-adapter";
 import { type StudioWorkspaceProps, DEFAULT_WORKSPACE_FEATURES } from "@/workspace/types";
@@ -804,9 +804,8 @@ export function StudioWorkspace({
 
   const noop = useCallback(() => {}, []);
 
-  // Both stable across keystrokes (X5): the loader gates on a boolean and writes through
-  // `updateCurrentTab`, whose identity depends only on the active tab id; the explain view's
-  // statement is read at the point of use, exactly as `StudioMobileHeader` reads the buffer.
+  // Stable across keystrokes (X5): the loader gates on a boolean and writes through
+  // `updateCurrentTab`, whose identity depends only on the active tab id.
   const handleLoadQuery = useCallback(
     (q: string) => {
       if (!runsTheActiveTab) return;
@@ -814,29 +813,8 @@ export function StudioWorkspace({
     },
     [runsTheActiveTab, tabMgr.updateCurrentTab],
   );
-  const getExplainQuery = useStableCallback(() => queryEditorRef.current?.getValue() ?? tabMgr.currentTab.query);
 
-  // The strip shows nothing of a tab's query, so a keystroke that only changes the
-  // query must not mint a new array and re-render the memoized bar (X5). The
-  // projection is keyed on the fields the strip actually draws.
-  const tabBarSignature = tabMgr.tabs
-    .map(
-      (tab) =>
-        `${tab.id}\u0000${tab.name}\u0000${tab.type}\u0000${tab.source !== undefined}\u0000${tab.source?.dirty === true}`,
-    )
-    .join("\u0001");
-  const tabBarTabs = useMemo(
-    () =>
-      tabMgr.tabs.map((tab) => ({
-        id: tab.id,
-        name: tab.name,
-        type: tab.type,
-        isSource: tab.source !== undefined,
-        dirty: tab.source?.dirty === true,
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on tabBarSignature, which is exactly the fields the strip draws
-    [tabBarSignature],
-  );
+  const tabBarTabs = useTabSummaries(tabMgr.tabs);
 
   return (
     <div
@@ -1085,7 +1063,7 @@ export function StudioWorkspace({
                         onSetMode={queryExec.setBottomPanelMode}
                         result={tabMgr.currentTab.result}
                         explainPlan={tabMgr.currentTab.explainPlan}
-                        getExplainQuery={getExplainQuery}
+                        explainQuery={queryExec.bottomPanelMode === "explain" ? tabMgr.currentTab.query : undefined}
                         resultQuery={tabMgr.currentTab.resultQuery}
                         runError={tabMgr.currentTab.runError}
                         schema={conn.schema}

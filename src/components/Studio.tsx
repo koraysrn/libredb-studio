@@ -57,6 +57,7 @@ import { useConnectionOrder } from "@/hooks/use-connection-order";
 import { useAuth } from "@/hooks/use-auth";
 import { useConnectionManager } from "@/hooks/use-connection-manager";
 import { useTabManager } from "@/hooks/use-tab-manager";
+import { useTabSummaries } from "@/hooks/use-tab-summaries";
 import { useTransactionControl } from "@/hooks/use-transaction-control";
 import { useQueryExecution } from "@/hooks/use-query-execution";
 import { useInlineEditing } from "@/hooks/use-inline-editing";
@@ -705,11 +706,6 @@ export default function Studio() {
     [runsTheActiveTab, tabMgr.updateCurrentTab],
   );
 
-  // The explain view pairs the editor's statement with the plan it rendered. Read it at the
-  // point of use rather than as a live prop: the live string changes on every keystroke and
-  // re-rendered the memoized panel each time (X5), exactly as the header now reads the buffer.
-  const getExplainQuery = useStableCallback(() => queryEditorRef.current?.getValue() ?? tabMgr.currentTab.query);
-
   /*
     The Explorer's per-row items call this with the row's ADDRESS; without carrying it the
     tab opened with nothing selected (#459). The address rides the query string - the admin
@@ -1083,27 +1079,7 @@ export default function Studio() {
     ],
   );
 
-  // The strip shows nothing of a tab's query, so a keystroke that only changes the
-  // query must not mint a new array and re-render the memoized bar (X5). The
-  // projection is keyed on the fields the strip actually draws.
-  const tabBarSignature = tabMgr.tabs
-    .map(
-      (tab) =>
-        `${tab.id}\u0000${tab.name}\u0000${tab.type}\u0000${tab.source !== undefined}\u0000${tab.source?.dirty === true}`,
-    )
-    .join("\u0001");
-  const tabBarTabs = useMemo(
-    () =>
-      tabMgr.tabs.map((tab) => ({
-        id: tab.id,
-        name: tab.name,
-        type: tab.type,
-        isSource: tab.source !== undefined,
-        dirty: tab.source?.dirty === true,
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on tabBarSignature, which is exactly the fields the strip draws
-    [tabBarSignature],
-  );
+  const tabBarTabs = useTabSummaries(tabMgr.tabs);
 
   return (
     <div className="flex h-screen w-full bg-canvas text-fg overflow-hidden font-sans select-none">
@@ -1426,7 +1402,7 @@ export default function Studio() {
                         onSetMode={queryExec.setBottomPanelMode}
                         result={tabMgr.currentTab.result}
                         explainPlan={tabMgr.currentTab.explainPlan}
-                        getExplainQuery={getExplainQuery}
+                        explainQuery={queryExec.bottomPanelMode === "explain" ? tabMgr.currentTab.query : undefined}
                         resultQuery={tabMgr.currentTab.resultQuery}
                         runError={tabMgr.currentTab.runError}
                         schema={conn.schema}

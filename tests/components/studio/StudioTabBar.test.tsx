@@ -6,7 +6,8 @@ import { describe, test, expect, mock, afterEach } from "bun:test";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
 
-import { StudioTabBar, type StudioTabSummary } from "@/components/studio/StudioTabBar";
+import { StudioTabBar } from "@/components/studio/StudioTabBar";
+import type { StudioTabSummary } from "@/hooks/use-tab-summaries";
 import type { QueryTab } from "@/lib/types";
 
 // =============================================================================

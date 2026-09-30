@@ -2,26 +2,10 @@
 
 import React, { useEffect, type Dispatch, type SetStateAction } from "react";
 import type { QueryTab } from "@/lib/types";
+import type { StudioTabSummary } from "@/hooks/use-tab-summaries";
 import { SHORTCUTS, matchesShortcut, shortcutLabel } from "@/lib/keyboard-shortcuts";
 import { cn } from "@/lib/utils";
 import { FileBraces, FileCode, Hash, Plus, X } from "lucide-react";
-
-/**
- * What the strip draws of a tab, and nothing else (X5).
- *
- * The bar used to be handed the whole `QueryTab`, whose identity changes on every
- * keystroke because `onContentChange` rewrites the query into the tab. Nothing the
- * bar draws reads the query, so the shells hand it this summary instead, and the
- * summary array stays referentially stable while the query is typed, which is what
- * lets `React.memo` bail out.
- */
-export interface StudioTabSummary {
-  id: string;
-  name: string;
-  type: string;
-  isSource: boolean;
-  dirty: boolean;
-}
 
 /**
  * Which icon a tab draws, in ONE place because the bar draws it in TWO (#789 Phase 2).
