@@ -31,8 +31,8 @@ let sourceReads: Array<{ path: unknown; kind: unknown }> = [];
 let sourceAnswer: { status: number; body: unknown } = { status: 200, body: {} };
 /** A source read that never settles, so a pane can be caught with NOTHING in hand. */
 let sourceHangs = false;
-/** Every render of the active tab's source state, in order, for the clear the apply writes. */
-let sourceStates: Array<{ id: string; source: SourceTabState }> = [];
+/** The Source tab's document, once per Monaco render, in order, for the clear the apply writes. */
+const sourceDocuments: string[] = [];
 
 const DEFINITION = "CREATE OR REPLACE FUNCTION app.order_total(integer)\n  RETURNS numeric AS $$ SELECT 1 $$;";
 
@@ -56,6 +56,7 @@ mock.module("@monaco-editor/react", () => ({
     onChange?: (value: string | undefined) => void;
   }) {
     editorProbe.change = props.onChange;
+    sourceDocuments.push(props.value ?? "");
     return (
       <textarea
         data-testid="source-editor"
@@ -316,15 +317,6 @@ mock.module("@/components/studio/index", () => {
      */
     BottomPanel: (props: Record<string, unknown>) => {
       capturedBottomPanelProps = props;
-      /*
-       * The ACTIVE tab's source state, recorded once per render (#789 Phase 3).
-       *
-       * `currentTab` is a prop this shell already hands out, so recording it introduces no seam
-       * the product does not have: the apply's clear is a write onto the tab, and this is where
-       * a test can watch the tab from outside the component that owns it.
-       */
-      const tab = props.currentTab as QueryTab | undefined;
-      if (tab?.source !== undefined) sourceStates.push({ id: tab.id, source: tab.source });
       return <div data-testid="bottom-panel" />;
     },
     BottomPanelMode: {},
@@ -342,10 +334,8 @@ const { default: Studio } = await import("@/components/Studio");
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DatabaseObject } from "@/lib/db/types";
-import type { QueryTab, SourceTabState } from "@/lib/types";
-import { StudioTabBar } from "@/components/studio/StudioTabBar";
+import { StudioTabBar, type StudioTabSummary } from "@/components/studio/StudioTabBar";
 import type { TreeRowActionHandlers } from "@/components/object-tree/row-actions";
-import { pathKey } from "@/lib/db/object-path";
 
 const ROUTINE: DatabaseObject = { path: ["app", "order_total(integer)"], name: "order_total", kind: "function" };
 const TABLE: DatabaseObject = { path: ["app", "orders"], name: "orders", kind: "table" };
@@ -495,7 +485,7 @@ beforeEach(() => {
   sourceReads = [];
   sourceAnswer = { status: 200, body: readableDocument };
   sourceHangs = false;
-  sourceStates = [];
+  sourceDocuments.length = 0;
   editRequests = [];
   applyAnswer = { status: 200, body: APPLIED };
   applyHangs = false;
@@ -737,12 +727,12 @@ describe("no statement runs while the tab on screen is a definition", () => {
     fire(capturedPaletteProps, "onLoadHistoryQuery", "DROP TABLE app.customers;");
 
     /*
-     * `currentQuery` is the mobile header's own prop and it is the active tab's query, which
-     * is the only place a reader of this suite can see what a Source tab is holding: the pane
-     * deliberately does not display it. An empty string here is the statement never arriving,
-     * which is the half that makes the Run assertion below more than a statement about Run.
+     * `query` is the active tab's query, which is the only place a reader of this suite can
+     * see what a Source tab is holding: the pane deliberately does not display it. An empty
+     * string here is the statement never arriving, which is the half that makes the Run
+     * assertion below more than a statement about Run.
      */
-    expect(capturedMobileHeaderProps.currentQuery).toBe("");
+    expect(capturedBottomPanelProps.query).toBe("");
     fire(capturedPaletteProps, "onExecuteQuery");
     expect(mockExecuteQuery).not.toHaveBeenCalled();
     expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION);
@@ -778,7 +768,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
     await openSourceTab();
     fire(capturedBottomPanelProps, "onLoadQuery", "DROP TABLE app.orders;");
 
-    expect(capturedMobileHeaderProps.currentQuery).toBe("");
+    expect(capturedBottomPanelProps.query).toBe("");
     expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION);
     expect(screen.queryByTestId("query-editor")).toBeNull();
   });
@@ -803,7 +793,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
 
     await openSourceTab();
     fire(capturedAgentRailProps, "onApplyStatement", "DROP TABLE app.orders;");
-    expect(capturedMobileHeaderProps.currentQuery).toBe("");
+    expect(capturedBottomPanelProps.query).toBe("");
 
     act(() =>
       (capturedAgentRailProps.onRunStatement as (sql: string, runId: string) => void)(
@@ -811,7 +801,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
         "run-2",
       ),
     );
-    expect(capturedMobileHeaderProps.currentQuery).toBe("");
+    expect(capturedBottomPanelProps.query).toBe("");
     expect(mockExecuteHandedOverStatement).toHaveBeenCalledTimes(1);
     expect(mockExecuteHandedOverStatement).toHaveBeenLastCalledWith("run-1", "SELECT 6;");
     expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION);
@@ -985,13 +975,13 @@ describe("the tab bar tells a Source tab apart", () => {
   });
 
   test("all three arms, driven at once: source, sql, and every other dialect", () => {
-    const base: QueryTab = { id: "t", name: "n", query: "", result: null, isExecuting: false, type: "sql" };
+    const base: StudioTabSummary = { id: "t", name: "n", type: "sql", isSource: false, dirty: false };
     render(
       <StudioTabBar
         tabs={[
           { ...base, id: "sql", name: "A query" },
           { ...base, id: "json", name: "A document query", type: "mongodb" },
-          { ...base, id: "src", name: "Source: app.f", source: { path: ["app", "f"], kind: "function" } },
+          { ...base, id: "src", name: "Source: app.f", isSource: true },
           // A Source tab whose dialect is NOT sql: the first arm has to win over the second,
           // or a Redis or MongoDB connection's Source tab takes the document icon.
           {
@@ -999,7 +989,7 @@ describe("the tab bar tells a Source tab apart", () => {
             id: "src-json",
             name: "Source: db.view",
             type: "mongodb",
-            source: { path: ["db", "view"], kind: "view" },
+            isSource: true,
           },
         ]}
         activeTabId="sql"
@@ -1019,10 +1009,10 @@ describe("the tab bar tells a Source tab apart", () => {
   });
 
   test("the ladder is the same one the rename input draws, so the icon does not change under a rename", () => {
-    const base: QueryTab = { id: "t", name: "n", query: "", result: null, isExecuting: false, type: "sql" };
+    const base: StudioTabSummary = { id: "t", name: "n", type: "sql", isSource: false, dirty: false };
     render(
       <StudioTabBar
-        tabs={[{ ...base, id: "src", name: "Source: app.f", source: { path: ["app", "f"], kind: "function" } }]}
+        tabs={[{ ...base, id: "src", name: "Source: app.f", isSource: true }]}
         activeTabId="src"
         editingTabId="src"
         editingTabName="Source: app.f"
@@ -1078,18 +1068,11 @@ const WITH_EDIT_DECLARATION = KINDS.map((kind) =>
   kind.id === "function" ? { ...kind, acceptsSourceEdits: true } : kind,
 );
 
-const SOURCE_TAB_ID = `source:function:${encodeURIComponent(pathKey([...ROUTINE.path]))}`;
-
 async function click(testId: string): Promise<void> {
   await act(async () => {
     (screen.getByTestId(testId) as HTMLElement).click();
     await Promise.resolve();
   });
-}
-
-/** The states the named tab's `source` passed through, in render order. */
-function statesFor(tabId: string): SourceTabState[] {
-  return sourceStates.filter((entry) => entry.id === tabId).map((entry) => entry.source);
 }
 
 /** Open the function's Source tab and wait for the definition to be on screen. */
@@ -1153,17 +1136,9 @@ describe("a successful apply in the standalone shell", () => {
     sourceAnswer = { status: 200, body: EDITABLE_DOCUMENT };
     await applySuccessfully();
 
-    // The clear landed on the tab, AFTER that tab had a document in hand.
-    const states = statesFor(SOURCE_TAB_ID);
-    const held = states.findIndex((state) => state.document !== undefined && state.readAtToken !== undefined);
-    expect(held).toBeGreaterThanOrEqual(0);
-    const cleared = states.findIndex(
-      (state, index) =>
-        index > held && state.document === undefined && state.failure === undefined && state.readAtToken === undefined,
-    );
-    expect(cleared).toBeGreaterThan(held);
-
-    // The token moved, so the pane re-read: a third read for the SAME address.
+    // The clear landed on the tab, and the third read below is what proves it: the pane
+    // re-reads only because the clear emptied the document (so `needsRead` became true),
+    // and a shell that cleared nothing would leave `sourceReads` at two.
     await waitFor(() => expect(sourceReads).toHaveLength(3));
     expect(sourceReads[2]).toEqual({ path: [...ROUTINE.path], kind: "function" });
     await waitFor(() => expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION));
@@ -1251,7 +1226,7 @@ describe("a successful apply in the standalone shell", () => {
     await waitFor(() => expect(screen.getByTestId("object-source-apply-outcome")).toBeTruthy());
     expect(sourceReads).toHaveLength(1);
     expect(mockToast).not.toHaveBeenCalled();
-    expect(statesFor(SOURCE_TAB_ID).at(-1)?.document).toBeDefined();
+    expect(sourceDocuments.at(-1)).toBe(DEFINITION);
   });
 });
 

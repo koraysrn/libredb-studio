@@ -1040,6 +1040,28 @@ export default function Studio() {
     ],
   );
 
+  // The strip shows nothing of a tab's query, so a keystroke that only changes the
+  // query must not mint a new array and re-render the memoized bar (X5). The
+  // projection is keyed on the fields the strip actually draws.
+  const tabBarSignature = tabMgr.tabs
+    .map(
+      (tab) =>
+        `${tab.id}\u0000${tab.name}\u0000${tab.type}\u0000${tab.source !== undefined}\u0000${tab.source?.dirty === true}`,
+    )
+    .join("\u0001");
+  const tabBarTabs = useMemo(
+    () =>
+      tabMgr.tabs.map((tab) => ({
+        id: tab.id,
+        name: tab.name,
+        type: tab.type,
+        isSource: tab.source !== undefined,
+        dirty: tab.source?.dirty === true,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on tabBarSignature, which is exactly the fields the strip draws
+    [tabBarSignature],
+  );
+
   return (
     <div className="flex h-screen w-full bg-canvas text-fg overflow-hidden font-sans select-none">
       <ResizablePanelGroup id="studio-main" orientation="horizontal" className="h-full">
@@ -1095,7 +1117,6 @@ export default function Studio() {
               isAdmin={isAdmin}
               activeMobileTab={activeMobileTab}
               isExecuting={tabMgr.currentTab.isExecuting}
-              currentQuery={tabMgr.currentTab.query}
               queryEditorRef={queryEditorRef}
               transactionActive={txn.transactionActive}
               playgroundMode={txn.playgroundMode}
@@ -1135,7 +1156,7 @@ export default function Studio() {
             />
 
             <StudioTabBar
-              tabs={tabMgr.tabs}
+              tabs={tabBarTabs}
               activeTabId={tabMgr.activeTabId}
               editingTabId={tabMgr.editingTabId}
               editingTabName={tabMgr.editingTabName}
@@ -1370,7 +1391,11 @@ export default function Studio() {
                       <BottomPanel
                         mode={queryExec.bottomPanelMode}
                         onSetMode={queryExec.setBottomPanelMode}
-                        currentTab={tabMgr.currentTab}
+                        result={tabMgr.currentTab.result}
+                        explainPlan={tabMgr.currentTab.explainPlan}
+                        query={tabMgr.currentTab.query}
+                        resultQuery={tabMgr.currentTab.resultQuery}
+                        runError={tabMgr.currentTab.runError}
                         schema={conn.schema}
                         schemaContext={conn.schemaContext}
                         activeConnection={conn.activeConnection}

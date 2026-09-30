@@ -7,6 +7,23 @@ import { cn } from "@/lib/utils";
 import { FileBraces, FileCode, Hash, Plus, X } from "lucide-react";
 
 /**
+ * What the strip draws of a tab, and nothing else (X5).
+ *
+ * The bar used to be handed the whole `QueryTab`, whose identity changes on every
+ * keystroke because `onContentChange` rewrites the query into the tab. Nothing the
+ * bar draws reads the query, so the shells hand it this summary instead, and the
+ * summary array stays referentially stable while the query is typed, which is what
+ * lets `React.memo` bail out.
+ */
+export interface StudioTabSummary {
+  id: string;
+  name: string;
+  type: string;
+  isSource: boolean;
+  dirty: boolean;
+}
+
+/**
  * Which icon a tab draws, in ONE place because the bar draws it in TWO (#789 Phase 2).
  *
  * The rename input and the tab button each render the icon beside the name, and the ladder
@@ -23,11 +40,11 @@ import { FileBraces, FileCode, Hash, Plus, X } from "lucide-react";
  * take it, and so do PromQL (#1085) and Kafka's read request (#1088), decided rather than
  * defaulted and pinned in `tests/components/studio/StudioTabBar.test.tsx`.
  */
-function tabIcon(tab: QueryTab): React.JSX.Element {
+function tabIcon(tab: StudioTabSummary): React.JSX.Element {
   // The ELEMENT rather than the component, so nothing here assigns a component to a local
   // inside a render: `react(static-components)` is an error in this repository's oxlint
   // configuration, and the three returns also keep the size and the stroke in one place.
-  if (tab.source !== undefined) return <FileCode strokeWidth={1.5} className="w-3 h-3" />;
+  if (tab.isSource) return <FileCode strokeWidth={1.5} className="w-3 h-3" />;
   if (tab.type === "sql") return <Hash strokeWidth={1.5} className="w-3 h-3" />;
   return <FileBraces strokeWidth={1.5} className="w-3 h-3" />;
 }
@@ -39,8 +56,8 @@ function tabIcon(tab: QueryTab): React.JSX.Element {
  * strip cannot mark one by accident. The pane writes `dirty` onto `SourceTabState` only when the
  * buffer's dirtiness FLIPS, so this costs one render per transition rather than one per keystroke.
  */
-function hasUnsavedEdit(tab: QueryTab): boolean {
-  return tab.source?.dirty === true;
+function hasUnsavedEdit(tab: StudioTabSummary): boolean {
+  return tab.dirty;
 }
 
 /**
@@ -56,12 +73,12 @@ function hasUnsavedEdit(tab: QueryTab): boolean {
  * from the visible text in the ordinary case. An `aria-label` that duplicates the visible label is
  * a second copy of the same string that can drift from it under a rename.
  */
-function tabAccessibleName(tab: QueryTab): string | undefined {
+function tabAccessibleName(tab: StudioTabSummary): string | undefined {
   return hasUnsavedEdit(tab) ? `${tab.name} (unsaved edit)` : undefined;
 }
 
 interface StudioTabBarProps {
-  tabs: QueryTab[];
+  tabs: ReadonlyArray<StudioTabSummary>;
   activeTabId: string;
   editingTabId: string | null;
   editingTabName: string;

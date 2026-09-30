@@ -6,7 +6,7 @@ import { describe, test, expect, mock, afterEach } from "bun:test";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
 
-import { StudioTabBar } from "@/components/studio/StudioTabBar";
+import { StudioTabBar, type StudioTabSummary } from "@/components/studio/StudioTabBar";
 import type { QueryTab } from "@/lib/types";
 
 // =============================================================================
@@ -17,14 +17,13 @@ afterEach(() => {
   cleanup();
 });
 
-function createTab(overrides: Partial<QueryTab> = {}): QueryTab {
+function createTab(overrides: Partial<StudioTabSummary> = {}): StudioTabSummary {
   return {
     id: "tab-1",
     name: "Query 1",
-    query: "SELECT 1",
-    result: null,
-    isExecuting: false,
     type: "sql",
+    isSource: false,
+    dirty: false,
     ...overrides,
   };
 }
@@ -335,7 +334,9 @@ describe("StudioTabBar", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(capturedFn).not.toBeNull();
-    const result = capturedFn!([tab1, tab2]);
+    // The updater reads only `id` and `name`, so the summaries stand in for the tabs
+    // the real hook would hand it.
+    const result = capturedFn!([tab1, tab2] as unknown as QueryTab[]);
     expect(result[0].name).toBe("Renamed");
     expect(result[1].name).toBe("Query 2");
   });
@@ -359,7 +360,7 @@ describe("StudioTabBar", () => {
     fireEvent.blur(input);
 
     expect(capturedFn).not.toBeNull();
-    const result = capturedFn!([tab1]);
+    const result = capturedFn!([tab1] as unknown as QueryTab[]);
     expect(result[0].name).toBe("Blur Name");
   });
 
@@ -536,11 +537,12 @@ describe("StudioTabBar", () => {
    * user with no idea which object the mark is about.
    */
   describe("a Source tab with an unsaved edit", () => {
-    const sourceTab = (dirty: boolean | undefined): QueryTab =>
+    const sourceTab = (dirty: boolean | undefined): StudioTabSummary =>
       createTab({
         id: "source:function:app%1Forder_total",
         name: "Source: app.order_total",
-        source: { path: ["app", "order_total"], kind: "function", dirty },
+        isSource: true,
+        dirty: dirty === true,
       });
 
     test("the tab bar marks an unsaved edit, and the accessible name CONTAINS the visible label", () => {

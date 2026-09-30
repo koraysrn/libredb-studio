@@ -23,6 +23,7 @@ let capturedSaveQueryModalProps: Record<string, unknown> = {};
 let capturedCommandPaletteProps: Record<string, unknown> = {};
 let capturedSafetyDialogProps: Record<string, unknown> = {};
 let capturedMobileHeaderProps: Record<string, unknown> = {};
+let capturedTabBarProps: Record<string, unknown> = {};
 let capturedSchemaExplorerProps: Record<string, unknown> = {};
 let capturedConnectionsListProps: Record<string, unknown> = {};
 let capturedQueryEditorProps: Record<string, unknown> = {};
@@ -340,7 +341,10 @@ mock.module("@/components/studio/index", () => {
       return React.createElement("div", { "data-testid": "mobile-header" }, "MobileHeader");
     },
     StudioDesktopHeader: () => React.createElement("div", { "data-testid": "desktop-header" }, "DesktopHeader"),
-    StudioTabBar: () => React.createElement("div", { "data-testid": "tab-bar" }, "TabBar"),
+    StudioTabBar: (props: Record<string, unknown>) => {
+      capturedTabBarProps = props;
+      return React.createElement("div", { "data-testid": "tab-bar" }, "TabBar");
+    },
     QueryToolbar: (props: Record<string, unknown>) => {
       capturedQueryToolbarProps = props;
       return React.createElement("div", { "data-testid": "query-toolbar" }, "QueryToolbar");
@@ -542,6 +546,7 @@ describe("Studio", () => {
     capturedCommandPaletteProps = {};
     capturedSafetyDialogProps = {};
     capturedMobileHeaderProps = {};
+    capturedTabBarProps = {};
     capturedSchemaExplorerProps = {};
     capturedConnectionsListProps = {};
     capturedQueryEditorProps = {};
@@ -2626,6 +2631,7 @@ describe("Studio", () => {
     const sidebar = { ...capturedSidebarProps };
     const rail = { ...capturedAgentRailProps };
     const toolbar = { ...capturedQueryToolbarProps };
+    const tabBar = { ...capturedTabBarProps };
 
     typed("SELECT 12");
     // The real hook holds metadata in state; this stub mints a new object per call.
@@ -2637,6 +2643,9 @@ describe("Studio", () => {
     expect(changed(sidebar, capturedSidebarProps)).toEqual([]);
     expect(changed(rail, capturedAgentRailProps)).toEqual([]);
     expect(changed(toolbar, capturedQueryToolbarProps)).toEqual([]);
+    // The bar receives a summary of the tabs, not the tabs themselves (X5), so a
+    // keystroke that only rewrites the query hands it the SAME summary array.
+    expect(capturedTabBarProps.tabs).toBe(tabBar.tabs);
   });
 
   test("below md the mobile nav opens the rail as a sheet", async () => {

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 test.describe("Tab Management", () => {
   test.beforeEach(async ({ page }) => {
@@ -50,5 +50,58 @@ test.describe("Tab Management", () => {
     await expect(page.getByRole("tab", { name: "Query 2" })).not.toBeVisible({ timeout: 3000 });
     // Query 1 should still exist
     await expect(page.getByRole("tab", { name: "Query 1" })).toBeVisible();
+  });
+
+  // The editor's text lives in Monaco's model, not the DOM, so it is written and read
+  // through the global `monaco` handle, the same way the other e2e files do.
+  async function typeInEditor(page: Page, sql: string): Promise<void> {
+    await expect(page.locator(".monaco-editor").first()).toBeVisible({ timeout: 15_000 });
+    await page.waitForFunction(
+      () =>
+        ((window as unknown as { monaco?: { editor: { getEditors(): unknown[] } } }).monaco?.editor.getEditors()
+          .length ?? 0) > 0,
+    );
+    await page.evaluate((query) => {
+      const monaco = (
+        window as unknown as { monaco?: { editor: { getEditors(): { setValue(value: string): void }[] } } }
+      ).monaco;
+      if (!monaco) throw new Error("monaco global not found");
+      monaco.editor.getEditors()[0].setValue(query);
+    }, sql);
+  }
+
+  async function editorValue(page: Page): Promise<string> {
+    return page.evaluate(() => {
+      const monaco = (window as unknown as { monaco?: { editor: { getEditors(): { getValue(): string }[] } } }).monaco;
+      if (!monaco) throw new Error("monaco global not found");
+      return monaco.editor.getEditors()[0].getValue();
+    });
+  }
+
+  test("a statement typed into the editor survives opening a new tab and returning", async ({ page }) => {
+    await typeInEditor(page, "SELECT 42");
+    // The new-tab shortcut listens on document so it works while Monaco has focus; it
+    // must not drop the text the tab has not yet blurred away.
+    await page.keyboard.press("Control+Shift+X");
+    await expect(page.getByRole("tab", { name: "Query 2" })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("tab", { name: "Query 1" }).click();
+    await expect(page.getByRole("tab", { name: "Query 1" })).toHaveAttribute("aria-selected", "true");
+
+    expect(await editorValue(page)).toBe("SELECT 42");
+  });
+
+  test("a statement typed into the editor survives a reload", async ({ page }) => {
+    await typeInEditor(page, "SELECT 43");
+    // The workspace save is debounced (500ms); give it time before the reload.
+    await page.waitForTimeout(2000);
+    await page.reload();
+    await expect(page.locator(".monaco-editor").first()).toBeVisible({ timeout: 15_000 });
+    await page.waitForFunction(
+      () =>
+        ((window as unknown as { monaco?: { editor: { getEditors(): unknown[] } } }).monaco?.editor.getEditors()
+          .length ?? 0) > 0,
+    );
+
+    expect(await editorValue(page)).toBe("SELECT 43");
   });
 });

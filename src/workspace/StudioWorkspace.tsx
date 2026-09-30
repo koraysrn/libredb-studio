@@ -803,6 +803,28 @@ export function StudioWorkspace({
 
   const noop = useCallback(() => {}, []);
 
+  // The strip shows nothing of a tab's query, so a keystroke that only changes the
+  // query must not mint a new array and re-render the memoized bar (X5). The
+  // projection is keyed on the fields the strip actually draws.
+  const tabBarSignature = tabMgr.tabs
+    .map(
+      (tab) =>
+        `${tab.id}\u0000${tab.name}\u0000${tab.type}\u0000${tab.source !== undefined}\u0000${tab.source?.dirty === true}`,
+    )
+    .join("\u0001");
+  const tabBarTabs = useMemo(
+    () =>
+      tabMgr.tabs.map((tab) => ({
+        id: tab.id,
+        name: tab.name,
+        type: tab.type,
+        isSource: tab.source !== undefined,
+        dirty: tab.source?.dirty === true,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on tabBarSignature, which is exactly the fields the strip draws
+    [tabBarSignature],
+  );
+
   return (
     <div
       data-studio-workspace=""
@@ -850,7 +872,7 @@ export function StudioWorkspace({
             {/* No desktop/mobile headers — platform provides its own */}
 
             <StudioTabBar
-              tabs={tabMgr.tabs}
+              tabs={tabBarTabs}
               activeTabId={tabMgr.activeTabId}
               editingTabId={tabMgr.editingTabId}
               editingTabName={tabMgr.editingTabName}
@@ -1048,7 +1070,11 @@ export function StudioWorkspace({
                       <BottomPanel
                         mode={queryExec.bottomPanelMode}
                         onSetMode={queryExec.setBottomPanelMode}
-                        currentTab={tabMgr.currentTab}
+                        result={tabMgr.currentTab.result}
+                        explainPlan={tabMgr.currentTab.explainPlan}
+                        query={tabMgr.currentTab.query}
+                        resultQuery={tabMgr.currentTab.resultQuery}
+                        runError={tabMgr.currentTab.runError}
                         schema={conn.schema}
                         schemaContext={conn.schemaContext}
                         activeConnection={conn.activeConnection}
