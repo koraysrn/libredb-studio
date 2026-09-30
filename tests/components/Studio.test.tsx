@@ -49,6 +49,11 @@ const mockFetchSchema = mock(() => {});
 const mockLoadObjects = mock(() => {});
 // Tab Manager
 const mockSetTabs = mock(() => {});
+const mockSetActiveTabId = mock(() => {});
+const mockSetEditingTabId = mock(() => {});
+const mockSetEditingTabName = mock(() => {});
+const mockAddTab = mock(() => {});
+const mockCloseTab = mock(() => {});
 const mockUpdateCurrentTab = mock(() => {});
 const mockUpdateTabById = mock(() => {});
 const mockHandleTableClick = mock(() => {});
@@ -91,6 +96,12 @@ const mockSaveMaskingConfig = mock(() => {});
 // URL (for export tests)
 const mockCreateObjectURL = mock(() => "blob:mock-url");
 const mockRevokeObjectURL = mock(() => {});
+// Stable defaults the stubs hand back every render. The REAL hooks hold these in `useState`,
+// so their identity survives a keystroke; a fresh literal here would make the X5 keystroke
+// test read a changed prop that no real render produces.
+const STABLE_USER = { username: "admin", role: "admin" };
+const EMPTY_SCHEMA: unknown[] = [];
+const EMPTY_PENDING_CHANGES: unknown[] = [];
 
 // ---- Hook override objects (spread into mock returns per-test) ----
 let connMgrOverride: Record<string, unknown> = {};
@@ -108,7 +119,7 @@ const failingSplitViews = new Set<"diagram" | "connection-dialog" | "schema-expl
 
 mock.module("@/hooks/use-auth", () => ({
   useAuth: mock(() => ({
-    user: { username: "admin", role: "admin" },
+    user: STABLE_USER,
     isAdmin: true,
     handleLogout: mockHandleLogout,
     ...authOverride,
@@ -120,7 +131,7 @@ mock.module("@/hooks/use-connection-manager", () => ({
     connections: [],
     servedSeeds: { loaded: true, seeds: [] },
     activeConnection: null,
-    schema: [],
+    schema: EMPTY_SCHEMA,
     schemaContext: "[]",
     isLoadingSchema: false,
     connectionPulse: "none",
@@ -165,13 +176,13 @@ mock.module("@/hooks/use-tab-manager", () => ({
     activeTabId: "tab-1",
     currentTab: { id: "tab-1", name: "Query 1", query: "SELECT 1", result: null, isExecuting: false, type: "sql" },
     setTabs: mockSetTabs,
-    setActiveTabId: mock(() => {}),
+    setActiveTabId: mockSetActiveTabId,
     editingTabId: null,
     editingTabName: "",
-    setEditingTabId: mock(() => {}),
-    setEditingTabName: mock(() => {}),
-    addTab: mock(() => {}),
-    closeTab: mock(() => {}),
+    setEditingTabId: mockSetEditingTabId,
+    setEditingTabName: mockSetEditingTabName,
+    addTab: mockAddTab,
+    closeTab: mockCloseTab,
     updateCurrentTab: mockUpdateCurrentTab,
     updateTabById: mockUpdateTabById,
     handleTableClick: mockHandleTableClick,
@@ -215,7 +226,7 @@ mock.module("@/hooks/use-query-execution", () => ({
 mock.module("@/hooks/use-inline-editing", () => ({
   useInlineEditing: mock(() => ({
     editingEnabled: false,
-    pendingChanges: [],
+    pendingChanges: EMPTY_PENDING_CHANGES,
     setEditingEnabled: mockSetEditingEnabled,
     handleCellChange: mockHandleCellChange,
     handleApplyChanges: mockHandleApplyChanges,
@@ -2596,10 +2607,11 @@ describe("Studio", () => {
    * show the query must not be handed a new prop because of it. The hooks are stubbed
    * here, so the stub does what the real ones do on a keystroke: new `tabs` and
    * `currentTab`, and a new identity for each hook function whose dependencies include
-   * the tabs (`handleTableClick`, `openSourceTab`, `closeTab`,
-   * `executeHandedOverStatement`, `handleLoadMore`).
+   * the tabs (`handleTableClick`, `openSourceTab`, `executeHandedOverStatement`,
+   * `handleLoadMore`). `closeTab` is NOT among them: it is stable (`useStableCallback`),
+   * which is what this test pins on the bar.
    */
-  test("a keystroke hands the sidebar, the rail and the toolbar the props they already had", async () => {
+  test("a keystroke hands the bar, the panel and the mobile header the props they already had", async () => {
     mockAgentConfig(true);
     // `servedSeeds` is state in the real hook; the stub would mint one per call.
     connMgrOverride = {
@@ -2614,7 +2626,6 @@ describe("Studio", () => {
         currentTab: tab,
         handleTableClick: (...args: unknown[]) => (mockHandleTableClick as (...a: unknown[]) => void)(...args),
         openSourceTab: () => {},
-        closeTab: () => {},
       };
       queryExecOverride = {
         executeHandedOverStatement: (...args: unknown[]) =>
@@ -2632,6 +2643,8 @@ describe("Studio", () => {
     const rail = { ...capturedAgentRailProps };
     const toolbar = { ...capturedQueryToolbarProps };
     const tabBar = { ...capturedTabBarProps };
+    const bottomPanel = { ...capturedBottomPanelProps };
+    const mobileHeader = { ...capturedMobileHeaderProps };
 
     typed("SELECT 12");
     // The real hook holds metadata in state; this stub mints a new object per call.
@@ -2643,9 +2656,13 @@ describe("Studio", () => {
     expect(changed(sidebar, capturedSidebarProps)).toEqual([]);
     expect(changed(rail, capturedAgentRailProps)).toEqual([]);
     expect(changed(toolbar, capturedQueryToolbarProps)).toEqual([]);
-    // The bar receives a summary of the tabs, not the tabs themselves (X5), so a
-    // keystroke that only rewrites the query hands it the SAME summary array.
-    expect(capturedTabBarProps.tabs).toBe(tabBar.tabs);
+    // The three children the shell hands the keystroke's own state to: the bar receives a
+    // summary array keyed on the fields it draws, the panel receives granular fields plus a
+    // stable explain-query getter, and the header receives stable handlers (X5). A keystroke
+    // that only rewrites the query must hand all three the SAME props.
+    expect(changed(tabBar, capturedTabBarProps)).toEqual([]);
+    expect(changed(bottomPanel, capturedBottomPanelProps)).toEqual([]);
+    expect(changed(mobileHeader, capturedMobileHeaderProps)).toEqual([]);
   });
 
   test("below md the mobile nav opens the rail as a sheet", async () => {

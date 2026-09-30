@@ -422,6 +422,22 @@ export default function Studio() {
   const runEditorQuery = useCallback(() => executeQuery(), [executeQuery]);
   const cancelEditorQuery = useCallback(() => cancelQuery(), [cancelQuery]);
 
+  // The mobile header is drawn OUTSIDE the query/source branch below, so its RUN, EXPLAIN and
+  // clear gate on the active tab themselves; the toolbar's counterparts are inside the branch
+  // and the branch is the gate. Each is a `useCallback` over values that do not change on a
+  // keystroke (`runsTheActiveTab` is a boolean, `executeQuery` reads refs, `updateCurrentTab`
+  // depends only on the active tab id), so the memoized header is handed the SAME handlers a
+  // keystroke later (X5).
+  const handleClearQuery = useCallback(() => tabMgr.updateCurrentTab({ query: "" }), [tabMgr.updateCurrentTab]);
+  const handleMobileExecuteQuery = useCallback(() => {
+    if (!runsTheActiveTab) return;
+    queryExec.executeQuery();
+  }, [runsTheActiveTab, queryExec.executeQuery]);
+  const handleMobileExplain = useCallback(() => {
+    if (!runsTheActiveTab) return;
+    queryExec.executeQuery(undefined, undefined, true);
+  }, [runsTheActiveTab, queryExec.executeQuery]);
+
   // 6. Inline Editing
   const editing = useInlineEditing({
     activeConnection: conn.activeConnection,
@@ -653,19 +669,46 @@ export default function Studio() {
     promise this makes about bytes rather than about authorship.
   */
   const { requestPrefill } = agentPrefill;
-  const askAgentAboutStatement = useCallback(() => {
+  // One identity for the memoized header and palette (X5): the statement is read at the point
+  // of use, the button press, so a keystroke that only rewrites the tab's query must not mint
+  // a new handler and re-render the header.
+  const askAgentAboutStatement = useStableCallback(() => {
     const statement = tabMgr.currentTab.query.trim();
     if (statement.length === 0) {
       if (isMobileViewport()) setIsAgentSheetOpen(true);
       return;
     }
     requestPrefill("investigation", statement);
-  }, [tabMgr.currentTab.query, requestPrefill]);
+  });
 
   // Data Masking
   const [maskingConfig, setMaskingConfig] = useState<MaskingConfig>(() => loadMaskingConfig());
   const effectiveMasking = shouldMask(user?.role, maskingConfig);
   const userCanToggle = canToggleMasking(user?.role, maskingConfig);
+
+  // Both are stable across keystrokes: `setMaskingConfig` is a state setter and
+  // `saveMaskingConfig` is a module import, so the memoized panel keeps its handlers (X5).
+  const handleToggleMasking = useCallback(() => {
+    setMaskingConfig((prev) => {
+      const updated = { ...prev, enabled: !prev.enabled };
+      saveMaskingConfig(updated);
+      return updated;
+    });
+  }, []);
+  const toggleMasking = userCanToggle ? handleToggleMasking : undefined;
+
+  const handleLoadQuery = useCallback(
+    (q: string) => {
+      if (!runsTheActiveTab) return;
+      tabMgr.updateCurrentTab({ query: q });
+    },
+    [runsTheActiveTab, tabMgr.updateCurrentTab],
+  );
+
+  // The explain view pairs the editor's statement with the plan it rendered. Read it at the
+  // point of use rather than as a live prop: the live string changes on every keystroke and
+  // re-rendered the memoized panel each time (X5), exactly as the header now reads the buffer.
+  const getExplainQuery = useStableCallback(() => queryEditorRef.current?.getValue() ?? tabMgr.currentTab.query);
 
   /*
     The Explorer's per-row items call this with the row's ADDRESS; without carrying it the
@@ -1122,26 +1165,16 @@ export default function Studio() {
               playgroundMode={txn.playgroundMode}
               editingEnabled={editingEnabled}
               onSelectConnection={conn.setActiveConnection}
-              onAddConnection={() => setIsConnectionModalOpen(true)}
+              onAddConnection={handleAddConnection}
               onLogout={handleLogout}
-              onSaveQuery={() => setIsSaveQueryModalOpen(true)}
-              onClearQuery={() => tabMgr.updateCurrentTab({ query: "" })}
-              onExecuteQuery={() => {
-                if (!runsTheActiveTab) return;
-                queryExec.executeQuery();
-              }}
-              onCancelQuery={() => queryExec.cancelQuery()}
+              onSaveQuery={openSaveQuery}
+              onClearQuery={handleClearQuery}
+              onExecuteQuery={handleMobileExecuteQuery}
+              onCancelQuery={cancelEditorQuery}
               {...transactionHandlers}
               onToggleEditing={onToggleEditing}
-              onImport={() => setIsImportModalOpen(true)}
-              onExplain={
-                metadata?.capabilities.supportsExplain
-                  ? () => {
-                      if (!runsTheActiveTab) return;
-                      queryExec.executeQuery(undefined, undefined, true);
-                    }
-                  : undefined
-              }
+              onImport={openImport}
+              onExplain={metadata?.capabilities.supportsExplain ? handleMobileExplain : undefined}
               // Absent while the runtime is off, so the header carries no control
               // that would open a rail that does not exist.
               onAskAgent={agentEnabled ? askAgentAboutStatement : undefined}
@@ -1393,7 +1426,7 @@ export default function Studio() {
                         onSetMode={queryExec.setBottomPanelMode}
                         result={tabMgr.currentTab.result}
                         explainPlan={tabMgr.currentTab.explainPlan}
-                        query={tabMgr.currentTab.query}
+                        getExplainQuery={getExplainQuery}
                         resultQuery={tabMgr.currentTab.resultQuery}
                         runError={tabMgr.currentTab.runError}
                         schema={conn.schema}
@@ -1403,17 +1436,7 @@ export default function Studio() {
                         historyKey={queryExec.historyKey}
                         savedKey={savedKey}
                         maskingEnabled={effectiveMasking}
-                        onToggleMasking={
-                          userCanToggle
-                            ? () => {
-                                setMaskingConfig((prev) => {
-                                  const updated = { ...prev, enabled: !prev.enabled };
-                                  saveMaskingConfig(updated);
-                                  return updated;
-                                });
-                              }
-                            : undefined
-                        }
+                        onToggleMasking={toggleMasking}
                         userRole={user?.role}
                         maskingConfig={maskingConfig}
                         editingEnabled={editingEnabled}
@@ -1421,10 +1444,7 @@ export default function Studio() {
                         onCellChange={editing.handleCellChange}
                         onApplyChanges={editing.handleApplyChanges}
                         onDiscardChanges={editing.handleDiscardChanges}
-                        onLoadQuery={(q) => {
-                          if (!runsTheActiveTab) return;
-                          tabMgr.updateCurrentTab({ query: q });
-                        }}
+                        onLoadQuery={handleLoadQuery}
                         onLoadMore={
                           tabMgr.currentTab.result?.pagination?.hasMore ? queryExec.handleLoadMore : undefined
                         }

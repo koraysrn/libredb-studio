@@ -170,7 +170,10 @@ interface BottomPanelProps {
   // `onContentChange` rewrites the query into the tab; these are the fields it reads.
   result: QueryResult | null;
   explainPlan: unknown;
-  query: string;
+  // The statement the explain view pairs with its plan, read at the point of use through a
+  // stable getter rather than as a live string: the live string changes on every keystroke
+  // and re-rendered this memoized panel each time (X5).
+  getExplainQuery?: () => string;
   resultQuery: string | undefined;
   runError: string | undefined;
   schema: readonly DetailedObject[];
@@ -233,7 +236,7 @@ export const BottomPanel = React.memo(function BottomPanel({
   onSetMode,
   result,
   explainPlan,
-  query,
+  getExplainQuery,
   resultQuery,
   runError,
   schema,
@@ -584,7 +587,7 @@ export const BottomPanel = React.memo(function BottomPanel({
               explanation of a statement that never produced it; with no query the view
               says so itself instead.
             */
-                query={hydratedPlan === null ? query : undefined}
+                query={hydratedPlan === null ? getExplainQuery?.() : undefined}
                 schemaContext={schemaContext}
                 databaseType={activeConnection?.type}
                 onLoadQuery={(q) => {

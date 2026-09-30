@@ -86,6 +86,38 @@ mock.module("@monaco-editor/react", () => ({
   },
 }));
 
+/**
+ * The viewer's own props, captured while the REAL viewer still renders underneath, for the clear
+ * the apply writes (#789 Phase 3). The barrel is doubled rather than the module, and the real
+ * `ObjectSourceView` is reached by its own path, so the mocked barrel cannot replace the one thing
+ * this file needs to be real — the same trick `embedded-source.test.tsx` uses for `refreshToken`.
+ */
+let capturedSourceViewProps: Record<string, unknown> = {};
+/** The ACTIVE Source tab's source state, once per viewer render, keyed by its address. */
+const sourceViewStates: Array<{ path: unknown; document: unknown; failure: unknown; readAtToken: unknown }> = [];
+mock.module("@/components/object-source", () => {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const React = require("react");
+  const { ObjectSourceView } = require("@/components/object-source/ObjectSourceView");
+  const applier = require("@/components/object-source/source-applier");
+  const reader = require("@/components/object-source/source-reader");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  return {
+    ...applier,
+    ...reader,
+    ObjectSourceView: (props: Record<string, unknown>) => {
+      capturedSourceViewProps = props;
+      sourceViewStates.push({
+        path: props.path,
+        document: props.document,
+        failure: props.failure,
+        readAtToken: props.readAtToken,
+      });
+      return React.createElement(ObjectSourceView, props);
+    },
+  };
+});
+
 let capturedSidebarProps: Record<string, unknown> = {};
 let capturedPaletteProps: Record<string, unknown> = {};
 let capturedMobileHeaderProps: Record<string, unknown> = {};
@@ -479,6 +511,7 @@ beforeEach(() => {
   capturedMobileHeaderProps = {};
   capturedBottomPanelProps = {};
   capturedAgentRailProps = {};
+  capturedSourceViewProps = {};
   agentCapabilityAnswer = false;
   capabilitiesOverride = { objectKinds: KINDS };
   buildMetadata();
@@ -486,6 +519,7 @@ beforeEach(() => {
   sourceAnswer = { status: 200, body: readableDocument };
   sourceHangs = false;
   sourceDocuments.length = 0;
+  sourceViewStates.length = 0;
   editRequests = [];
   applyAnswer = { status: 200, body: APPLIED };
   applyHangs = false;
@@ -732,7 +766,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
      * string here is the statement never arriving, which is the half that makes the Run
      * assertion below more than a statement about Run.
      */
-    expect(capturedBottomPanelProps.query).toBe("");
+    expect(activeQuery()).toBe("");
     fire(capturedPaletteProps, "onExecuteQuery");
     expect(mockExecuteQuery).not.toHaveBeenCalled();
     expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION);
@@ -768,7 +802,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
     await openSourceTab();
     fire(capturedBottomPanelProps, "onLoadQuery", "DROP TABLE app.orders;");
 
-    expect(capturedBottomPanelProps.query).toBe("");
+    expect(activeQuery()).toBe("");
     expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION);
     expect(screen.queryByTestId("query-editor")).toBeNull();
   });
@@ -793,7 +827,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
 
     await openSourceTab();
     fire(capturedAgentRailProps, "onApplyStatement", "DROP TABLE app.orders;");
-    expect(capturedBottomPanelProps.query).toBe("");
+    expect(activeQuery()).toBe("");
 
     act(() =>
       (capturedAgentRailProps.onRunStatement as (sql: string, runId: string) => void)(
@@ -801,7 +835,7 @@ describe("no statement runs while the tab on screen is a definition", () => {
         "run-2",
       ),
     );
-    expect(capturedBottomPanelProps.query).toBe("");
+    expect(activeQuery()).toBe("");
     expect(mockExecuteHandedOverStatement).toHaveBeenCalledTimes(1);
     expect(mockExecuteHandedOverStatement).toHaveBeenLastCalledWith("run-1", "SELECT 6;");
     expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION);
@@ -1068,6 +1102,18 @@ const WITH_EDIT_DECLARATION = KINDS.map((kind) =>
   kind.id === "function" ? { ...kind, acceptsSourceEdits: true } : kind,
 );
 
+/** The active tab's query, read through the panel's stable explain getter (X5). */
+function activeQuery(): string {
+  return (capturedBottomPanelProps.getExplainQuery as () => string)();
+}
+
+/** The states the addressed Source tab's `source` passed through, in viewer-render order. */
+function statesForPath(path: readonly string[]): Array<{ document: unknown; failure: unknown; readAtToken: unknown }> {
+  return sourceViewStates
+    .filter((entry) => JSON.stringify(entry.path) === JSON.stringify(path))
+    .map(({ document, failure, readAtToken }) => ({ document, failure, readAtToken }));
+}
+
 async function click(testId: string): Promise<void> {
   await act(async () => {
     (screen.getByTestId(testId) as HTMLElement).click();
@@ -1136,9 +1182,17 @@ describe("a successful apply in the standalone shell", () => {
     sourceAnswer = { status: 200, body: EDITABLE_DOCUMENT };
     await applySuccessfully();
 
-    // The clear landed on the tab, and the third read below is what proves it: the pane
-    // re-reads only because the clear emptied the document (so `needsRead` became true),
-    // and a shell that cleared nothing would leave `sourceReads` at two.
+    // The clear landed on the tab, AFTER that tab had a document in hand.
+    const states = statesForPath([...ROUTINE.path]);
+    const held = states.findIndex((state) => state.document !== undefined && state.readAtToken !== undefined);
+    expect(held).toBeGreaterThanOrEqual(0);
+    const cleared = states.findIndex(
+      (state, index) =>
+        index > held && state.document === undefined && state.failure === undefined && state.readAtToken === undefined,
+    );
+    expect(cleared).toBeGreaterThan(held);
+
+    // The token moved, so the pane re-read: a third read for the SAME address.
     await waitFor(() => expect(sourceReads).toHaveLength(3));
     expect(sourceReads[2]).toEqual({ path: [...ROUTINE.path], kind: "function" });
     await waitFor(() => expect((screen.getByTestId("source-editor") as HTMLTextAreaElement).value).toBe(DEFINITION));
@@ -1226,7 +1280,7 @@ describe("a successful apply in the standalone shell", () => {
     await waitFor(() => expect(screen.getByTestId("object-source-apply-outcome")).toBeTruthy());
     expect(sourceReads).toHaveLength(1);
     expect(mockToast).not.toHaveBeenCalled();
-    expect(sourceDocuments.at(-1)).toBe(DEFINITION);
+    expect(statesForPath([...ROUTINE.path]).at(-1)?.document).toBeDefined();
   });
 });
 

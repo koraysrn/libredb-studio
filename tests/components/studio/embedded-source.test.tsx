@@ -579,11 +579,13 @@ describe("the embedded workspace reads an object's source through the host", () 
      * back to the query tab passed against the ungated loader, because the write landed on the
      * OTHER tab.
      *
-     * BottomPanel is no longer handed the whole tab (X5), so the empty query is read off its
-     * granular `query` prop. The pane above showing the definition is what proves the active
-     * tab is the Source tab, so an empty query here cannot be some other tab's.
+     * BottomPanel is no longer handed the whole tab (X5), so the Source tab's ADDRESS is read off
+     * the viewer's own `path` prop and the empty query off the panel's stable explain getter. The
+     * pane above showing the definition is what proves the active tab is the Source tab, so an
+     * empty query here cannot be some other tab's.
      */
-    expect(capturedBottomPanelProps.query).toBe("");
+    expect(capturedSourceViewProps.path).toEqual(ROUTINE.path);
+    expect((capturedBottomPanelProps.getExplainQuery as () => string)()).toBe("");
   });
 
   test("a kind that declares no source is offered nothing and activates nothing", async () => {
