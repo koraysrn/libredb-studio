@@ -9,7 +9,8 @@
  *   would otherwise look already-escaped to a renderer, so the backslash is doubled
  *   before the pipe is escaped.
  * - `|` next, because an unescaped pipe ends the cell and shifts every column after it.
- * - `\n`/`\r` last, as `<br>`, because a bare newline ends the table row mid-cell.
+ * - `\n`/`\r` last, one `<br>` per line break (`\r\n` counts as one), because a bare
+ *   newline ends the table row mid-cell.
  *
  * The header is escaped with the same function as the cells: a header is a cell too,
  * and a column name with a pipe in it would otherwise split the table on the first line.
@@ -25,7 +26,7 @@ export function markdownCell(value: unknown): string {
   return renderValue(value)
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
-    .replace(/[\r\n]+/g, "<br>");
+    .replace(/\r\n|\r|\n/g, "<br>");
 }
 
 /**

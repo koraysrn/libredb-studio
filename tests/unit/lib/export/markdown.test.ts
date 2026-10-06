@@ -15,6 +15,7 @@ describe("markdownCell", () => {
     expect(markdownCell("line1\nline2")).toBe("line1<br>line2");
     expect(markdownCell("x\ry")).toBe("x<br>y");
     expect(markdownCell("a\r\nb")).toBe("a<br>b");
+    expect(markdownCell("a\n\nb")).toBe("a<br><br>b");
   });
 
   test("writes an absent value as an empty cell, not as the text of the absence", () => {
