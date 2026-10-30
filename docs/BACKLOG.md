@@ -40,7 +40,7 @@ None of it is a GitHub issue.
 - [Security Phase 3 deferrals](#security-phase-3-deferrals) — K4-K8 · 5
 - [Security scanner triage](#security-scanner-triage) — SCAN1-SCAN2 · 2
 - [Agent M1 deferrals (#328)](#agent-m1-deferrals-328) — A2–A8 · 5
-- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2-B158 · 87
+- [Agent M2 deferrals (#329)](#agent-m2-deferrals-329) — B2-B158 · 86
 - [Passkey deferrals (#785)](#passkey-deferrals-785) — PK1-PK9 · 8
 - [MCP server deferrals (#246)](#mcp-server-deferrals-246) — MCP1-MCP4 · 4
 - [Governance follow-ups](#governance-follow-ups) — GOV1-GOV30 · 30
@@ -1192,12 +1192,13 @@ test pins the behaviour that was chosen.
 
 ### D85. The `@/lib/auth` mock is hand-copied across a layer, untyped, and already misses four exports
 
-`grep -rl 'mock.module("@/lib/auth"' tests/` returns exactly 55 hits, re-measured 2026-10-29; the breakdown below is the one measured at 54 on 2026-10-17.
+`grep -rl 'mock.module("@/lib/auth"' tests/` returns exactly 56 hits, re-measured on this branch on 2026-10-30: `main` held 55 of them, and the fifty-sixth is this branch's own AI fence test, described below. The breakdown below is the one measured at 54 on 2026-10-17.
 Twenty of them spread the real module and replace one function (`{ ...realAuth, getSession: mockGetSession }`, the agent routes' pattern).
 Thirty-one write out the same five-key object - `getSession`, `signJWT`, `verifyJWT`, `login`, `logout` - down to the same `mock(async () => "mock-token")` for a token nothing reads, and one of those thirty-one is `tests/helpers/object-edit-route-harness.ts`, a shared harness that could have been the factory and copied the stub instead.
 The remaining three write a shorter stub of their own, two with two keys and one with a single `getSession`.
 The count moved from 53 to 54 between 2026-10-12 and 2026-10-14: `tests/api/db-test-connection-modbus.test.ts`, added by `1ab0d88ff`, is the fifty-fourth, and it is a five-key copy down to the `mock(async () => "mock-token")` for a token nothing reads. The copying this entry describes continued after the entry was written, which is the argument for the factory rather than against it.
 The count moved from 54 to 55 on 2026-10-29: `tests/api/auth/openshift-callback-role.test.ts` is the fifty-fifth, and it spreads the real module and replaces only `login`, so it adds no copy of the five-key stub.
+The count moved from 55 to 56 with `tests/security/ai-prompt-fence.test.ts`, added with the AI route fence work: it is the fifty-sixth, and it is a copy, carrying one key the other stubs lack, `readSession`, because the AI routes read the session through it.
 
 `src/lib/auth.ts` re-exports three names from `src/lib/auth-cookies.ts` that every hand-written stub lacks:
 `resetCookieSecurityWarning`, `readCookieSecureOverride` and `isLoopbackHost`, re-measured 2026-10-30.
@@ -8430,15 +8431,6 @@ Kept so that message exposure and MCP statement read are decisions of their own 
 Found 2026-10-12 while designing the RabbitMQ provider; narrowed 2026-10-31 when agent mode joined RabbitMQ.
 
 **Done when:** the owner rules on which message values agent mode may read on RabbitMQ and how they are redacted, the `rabbitread` pack offers the workflows that ruling opens, a per-engine exposure ruling opens MCP statement read for RabbitMQ, the pack declares its MCP facet (`src/lib/agent/languages/rabbitread/mcp.ts`, registered in `AGENT_LANGUAGE_MCP_FACETS`) under the same table and projection, and `MCP_STATEMENT_READ.rabbitmq` is true, with tests that every MCP answer carries no message value; cited in `docs/AGENT.md`.
-
-### B109. The schema docs route puts database-written names in the prompt without the untrusted-content fence
-
-`POST /api/ai/describe-schema` (`src/app/api/ai/describe-schema/route.ts`) places the schema text the client built, which holds names anyone with write access to the database or broker chose, in the prompt with no untrusted-content fence, for every provider; the Docs tab posts it.
-The route has no tools, so the exposure is a spoofed document on the user's own screen, not an action.
-
-Found 2026-10-12 while designing the RabbitMQ provider.
-
-**Done when:** the route fences the names as plan mode and MCP do (`src/lib/agent/untrusted-content.ts`), with a test that a table named as an instruction is found only inside the fence.
 
 ### B110. The answer card counts every inventoried object under the engine's entity noun
 

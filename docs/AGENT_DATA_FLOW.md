@@ -59,9 +59,9 @@ if it only lists the good news.
 | An **agent run** | The above, plus the rows of each read the model performed, up to 200 per read; engine error text; server-written refusals; server-minted ids | Same fence |
 | Any **run that continues a conversation**, in either mode, on any engine | **In addition to everything above**: the earlier steps' objectives — *your own earlier questions*, capped at 200 characters each — and the most recent step's report, which is a model's claims about your data. No row of any result, and no earlier step's report but the newest. Sent only when the rail attaches a previous run's id, which it does for a follow-up on the same connection; a run that starts its own conversation sends no such message. Bounded to 4000 characters by default and switchable off with `LIBREDB_AGENT_THREAD_CONTEXT=false`. See [the conversation](#2a-the-conversation-when-a-run-continues-one--fenced) | Same fence, identified as `operation agent/thread`: it is prose a user and a model wrote, and none of it is the server's voice |
 | An **agent run opened as Operate** | Your objective; a **schema inventory reduced to its own names and index names** (no column names, no column types, no relations graph), read whichever of the two ways that engine is read and named with whichever noun that engine's provider declares — tables, collections, datasources, key patterns; in Plan mode the engine's **row-count estimates** for those same tables where the engine holds any — PostgreSQL and SQLite — and nothing per column; and the rows of each curated reading — which, for the `sessions` and `slow-queries` kinds, include **other database users' in-flight statement text and their database usernames**. See [the operations workflow](#5a-the-operations-workflow-what-a-curated-reading-sends) | Same fence: the inventory and every reading's rows are database content and are fenced |
-| `POST /api/ai/explain` | Your statement, the EXPLAIN plan, the schema context the browser holds, the engine type | No |
-| `POST /api/ai/query-safety` | Your statement, a filtered schema context, the engine type. Never an etcd, Milvus, Qdrant, Weaviate, InfluxDB (InfluxQL), Oxia, S3-compatible object storage or Kubernetes statement: the dialog posts nothing for an engine whose destructive vocabulary declares `safetyAnalysis: false`, which those eight do, because an etcd `put` carries its value in the statement (#1089), a Milvus, Qdrant or Weaviate request carries vectors, filters and values, an InfluxQL statement carries tag values and filters, an Oxia command names keys whose paths name Pulsar tenants and namespaces, an S3 command names buckets and object keys, and a kubectl statement names namespaces and objects | No |
-| `POST /api/ai/describe-schema` | A schema context. From the **Data Profiler** that context includes a per-column `min=` and `max=`, which are **real column values**, except on a column the data masking configuration masks for you, which is sent masked | No |
+| `POST /api/ai/explain` | Your statement, the EXPLAIN plan, the schema context the browser holds, the engine type | Yes — the server fences the query, plan and schema before the prompt (`src/lib/ai/prompt-fence.ts`) |
+| `POST /api/ai/query-safety` | Your statement, a filtered schema context, the engine type. Never an etcd, Milvus, Qdrant, Weaviate, InfluxDB (InfluxQL), Oxia, S3-compatible object storage or Kubernetes statement: the dialog posts nothing for an engine whose destructive vocabulary declares `safetyAnalysis: false`, which those eight do, because an etcd `put` carries its value in the statement (#1089), a Milvus, Qdrant or Weaviate request carries vectors, filters and values, an InfluxQL statement carries tag values and filters, an Oxia command names keys whose paths name Pulsar tenants and namespaces, an S3 command names buckets and object keys, and a kubectl statement names namespaces and objects | Yes — the server fences the query and schema before the prompt (`src/lib/ai/prompt-fence.ts`) |
+| `POST /api/ai/describe-schema` | A schema context. From the **Data Profiler** that context includes a per-column `min=` and `max=`, which are **real column values**, except on a column the data masking configuration masks for you, which is sent masked | Yes — the server fences the schema before the prompt (`src/lib/ai/prompt-fence.ts`) |
 | Everything else in the **running server** | Every outbound connection goes to a host **you** configured — your databases, your OIDC issuer when `NEXT_PUBLIC_AUTH_PROVIDER=oidc` (`src/lib/oidc.ts`), and the model provider above. The one host `src/` names itself is OpenAI's default base URL, reached only if you set `LLM_PROVIDER=openai` (`src/lib/llm/utils/config.ts:23`) | — |
 | The **`npx` launcher**, before the server exists | The release tarball and `SHA256SUMS` from a hard-coded `github.com` URL (`bin/lib/launcher-utils.mjs:87`, from `bin/studio.js:218-219`). Once per version, cached in `~/.libredb-studio/`; no other install path uses it | — |
 
@@ -657,8 +657,10 @@ output cap, and what it sends is one objective — see
 ## The other AI surfaces
 
 The agent is not the only thing that can reach a model. **Four surfaces remain, over three routes** —
-`describe-schema` is reached from two of them — each on an explicit user action, and none of them
-fences what it sends:
+`describe-schema` is reached from two of them — each on an explicit user action. The three routes fence
+**on the server** (`src/lib/ai/prompt-fence.ts`, which reuses the agent's
+`src/lib/agent/untrusted-content.ts`), so a name written into the database cannot be read as the
+server's own instruction:
 
 | Feature | Route | What the browser sends | Call site |
 | --- | --- | --- | --- |
@@ -682,6 +684,12 @@ route returns.
 
 None of the four surfaces fires on its own: each is behind a control the user presses.
 
+A host that supplies `onDescribeSchema` (the Data Profiler) or `onAnalyzeSafety` (the query safety
+dialog) replaces the route call with its own adapter, so no request leaves for `/api/ai/*` and the
+fence above does not run: the prompt that adapter sends is the host's own, built from the same
+untrusted context. A host adapting either surface has to fence that context itself, the way
+`src/lib/ai/prompt-fence.ts` does, or the names in it reach its model as the host's own words.
+
 ---
 
 ## Verifying this page yourself
@@ -691,7 +699,7 @@ None of the four surfaces fires on its own: each is behind a control the user pr
 grep -n "messages.push\|toolResultMessage" src/lib/agent/investigation.ts
 
 # Every place database-derived text is wrapped before it can reach a prompt
-grep -rn "fenceUntrustedContent(" src/lib/agent/
+grep -rn "fenceUntrustedContent(" src/lib/agent/ src/lib/ai/
 
 # Every request that leaves for a model provider
 grep -rn "streamText(" src/lib/agent/
