@@ -571,11 +571,14 @@ export const MCP_EXPOSABLE: Readonly<Record<DatabaseType, boolean>> = Object.fre
   mtconnect: true,
   // MCP is outside this provider's first version. A read also needs the register map kept with
   // the connection, because Modbus has no discovery and a name means only what that document
-  // says it means, so an MCP client has nothing to form a read from on its own.
+  // says it means, so an MCP client has nothing to form a read from on its own. Agent mode reads
+  // the device paced and counted per run, and no MCP surface that paces a device is designed yet
+  // (BACKLOG B160).
   modbus: false,
-  // MCP is outside this provider's first version, as for etcd, Oxia, S3 and MQTT. A statement tool offered later
-  // has to deal with configuration values: a read-only account still reads password hashes and keystore entries
-  // out of the configuration, which is why the catalog carries names only (docs/providers/netconf.md 6.3).
+  // Closed: agent mode reads NETCONF configuration and state with keys, password hashes, access rules and every node
+  // the device's own YANG marks nacm:default-deny-all withheld, and no MCP surface that withholds them is designed yet;
+  // a read-only account still reads password hashes and keystore entries, which is why the catalog carries names only
+  // (docs/providers/netconf.md 6.3, BACKLOG B159).
   netconf: false,
   // Closed: agent mode reads SNMP values with the SNMP security modules withheld, and no MCP surface that
   // withholds them is designed yet (BACKLOG B158).
@@ -674,7 +677,11 @@ export const MCP_STATEMENT_READ: Readonly<Record<DatabaseType, boolean>> = Objec
   rabbitmq: false,
   opcua: false,
   mtconnect: false,
+  // Agent mode executes paced reads on Modbus, and MCP read stays closed on it until a change of its own opens it
+  // (BACKLOG B160).
   modbus: false,
+  // Agent mode executes reads on NETCONF with the withheld nodes pruned, and MCP read stays closed on it until a
+  // change of its own opens it (BACKLOG B159).
   netconf: false,
   // Agent mode executes reads on SNMP with the SNMP security modules withheld, and MCP read stays closed on it
   // until a change of its own opens it (BACKLOG B158).

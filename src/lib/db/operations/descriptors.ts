@@ -39,6 +39,8 @@ import { rabbitreadAgentReadInput } from "./rabbitread-admission";
 import { s3apiAgentReadInput } from "./s3api-admission";
 import { fsqueryAgentReadInput } from "./fsquery-admission";
 import { snmpgetAgentReadInput } from "./snmpget-admission";
+import { netconfrpcAgentReadInput } from "./netconfrpc-admission";
+import { modbusreadAgentReadInput } from "./modbusread-admission";
 import { weaviateapiAgentReadInput } from "./weaviateapi-admission";
 import { agentPlanExecutionSqlInput, agentQueryReadSqlInput, agentReadSqlInput } from "./statement-guard";
 import type { RegistrableOperationDescriptor } from "./types";
@@ -778,6 +780,81 @@ const snmpgetQueryReadDescriptor: RegistrableOperationDescriptor = {
   },
 };
 
+const NETCONFRPC_READ_BOUNDARY =
+  "NETCONF: the provider's structural closed table, read with the console's own parser: one JSON request per read, " +
+  "the console's read request (a datastore and a path, read with get-config on running, candidate and startup and " +
+  "with get-data on operational and intended) or a schema request for one module's YANG text (get-schema), sent " +
+  "through an agent client whose requests are the reads of the one request builder, which holds get, get-config, " +
+  "get-data, get-schema and close-session and no write, over a session opened for that read alone. Before every read " +
+  "the client reads the device's YANG library and the text of every module it lists, and withholds what they mark: " +
+  "the ietf-keystore and ietf-netconf-acm modules whole, every node a module marks nacm:default-deny-all, every leaf " +
+  "typed crypt-hash, the private-key-type, key-type and password-type choices of ietf-crypto-types, every leafref " +
+  "that may point at a withheld node, every unresolved leafref, every leaf whose type names a typedef no module the " +
+  "device serves declares, and every entry of a list keyed by a withheld leaf; " +
+  "a read whose modules cannot be read, or that serve more than the check's total, is refused, a path naming a withheld node or " +
+  "filtering on a withheld key is refused before it is sent, and a withheld node in an answer is replaced by " +
+  "[withheld]. NACM's own access-denied on writes is measured, not relied on. A list past the row budget and a " +
+  "result past the byte budget are refused, never truncated.";
+
+/**
+ * One NETCONF read the model wrote, on a `netconf` connection.
+ *
+ * R1 on a structural boundary: the agent's client holds reads alone. Its own id, and not a widened `sql.query.read`, so
+ * the SQL contract and its audit action stay exactly what they were.
+ */
+const netconfrpcQueryReadDescriptor: RegistrableOperationDescriptor = {
+  id: "netconfrpc.query.read",
+  riskClass: 1,
+  accessLevel: "data-read",
+  requiredCapabilities: [],
+  resourceCost: "heavy",
+  supportsDryRun: false,
+  requiresApproval: false,
+  modelStatement: true,
+  inputSchema: netconfrpcAgentReadInput,
+  verification: {
+    reviewedBy: "NETCONF agent execution design review",
+    boundary: NETCONFRPC_READ_BOUNDARY,
+    verifiedOn: "2026-10-31",
+  },
+};
+
+const MODBUSREAD_READ_BOUNDARY =
+  "Modbus: the provider's structural closed table, read with the console's own parser: one of the console's three " +
+  "JSON read requests (points the connection's register map names, one block of one table, or the device " +
+  "identification objects), built by the five request builders of pdu.ts, none of which takes a function code from " +
+  "its caller (Read Coils, Read Discrete Inputs, Read Holding Registers and Read Input Registers, chosen by the table, " +
+  "and Read Device Identification, 43/14), over a socket opened for that read alone whose valve re-reads every " +
+  "outbound frame before socket.write and refuses every other function code, so no write, diagnostic, file record " +
+  "or FIFO request can be sent. Modbus has no credential, so values are answered as the console renders them. Agent " +
+  "reads of one device never overlap across every run and connection of the server process, a fixed 1,000 ms gap " +
+  "follows each from its socket's close, and one run sends a bounded number of device requests; a read past the row, " +
+  "byte or time budget, or past the run's request bound, is refused, never truncated.";
+
+/**
+ * One Modbus read the model wrote, on a `modbus` connection.
+ *
+ * R1 on a structural boundary: the agent's reads reach the device only through the provider's read builders and the
+ * valve. Its own id, and not a widened `sql.query.read`, so the SQL contract and its audit action stay exactly what
+ * they were.
+ */
+const modbusreadQueryReadDescriptor: RegistrableOperationDescriptor = {
+  id: "modbusread.query.read",
+  riskClass: 1,
+  accessLevel: "data-read",
+  requiredCapabilities: [],
+  resourceCost: "heavy",
+  supportsDryRun: false,
+  requiresApproval: false,
+  modelStatement: true,
+  inputSchema: modbusreadAgentReadInput,
+  verification: {
+    reviewedBy: "Modbus agent execution design review",
+    boundary: MODBUSREAD_READ_BOUNDARY,
+    verifiedOn: "2026-10-31",
+  },
+};
+
 const FSQUERY_READ_BOUNDARY =
   "Firestore: the provider's structural closed table, read with the console's own parser: one read of a closed table " +
   "of four metadata reads (the root collection ids, the subcollection ids of one document the statement names in full, " +
@@ -1102,6 +1179,8 @@ const CANONICAL_DESCRIPTORS: readonly RegistrableOperationDescriptor[] = Object.
   s3apiQueryReadDescriptor,
   fsqueryQueryReadDescriptor,
   snmpgetQueryReadDescriptor,
+  netconfrpcQueryReadDescriptor,
+  modbusreadQueryReadDescriptor,
 ]);
 
 /**

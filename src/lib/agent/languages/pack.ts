@@ -139,6 +139,16 @@ type SnmpgetOperation =
   /** One SNMP read the model wrote, on an `snmp` connection; see `snmpgetQueryReadDescriptor`. */
   "snmpget.query.read";
 
+/** The netconfrpc request language's operation: its one read. */
+type NetconfrpcOperation =
+  /** One NETCONF read the model wrote, on a `netconf` connection; see `netconfrpcQueryReadDescriptor`. */
+  "netconfrpc.query.read";
+
+/** The modbusread request language's operation: its one read. */
+type ModbusreadOperation =
+  /** One Modbus read the model wrote, on a `modbus` connection; see `modbusreadQueryReadDescriptor`. */
+  "modbusread.query.read";
+
 /** The s3api command language's operation: its one read. */
 type S3apiOperation =
   /** One S3 metadata read the model wrote, on an `s3` connection; see `s3apiQueryReadDescriptor`. */
@@ -166,6 +176,8 @@ export interface AgentFamilyOperationIds {
   readonly s3api: S3apiOperation;
   readonly fsquery: FsqueryOperation;
   readonly snmpget: SnmpgetOperation;
+  readonly netconfrpc: NetconfrpcOperation;
+  readonly modbusread: ModbusreadOperation;
 }
 
 /** kubectl's goal verifiers. */
@@ -231,6 +243,10 @@ export interface AgentFamilyVerifierIds {
   readonly fsquery: never;
   /** None: its workflows are judged by the core's own rules. */
   readonly snmpget: never;
+  /** None: its workflows are judged by the core's own rules. */
+  readonly netconfrpc: never;
+  /** None: its workflows are judged by the core's own rules. */
+  readonly modbusread: never;
 }
 
 /** The operation a family's model-written reads are evaluated under: its row's `<family>.query.read`. */
@@ -499,6 +515,8 @@ export interface AgentFamilyEvidenceTools {
   readonly s3api: never;
   readonly fsquery: never;
   readonly snmpget: never;
+  readonly netconfrpc: never;
+  readonly modbusread: never;
 }
 
 /** Every pack's evidence tool: a member of the core's `AgentToolName`, declared by the pack that offers it. */
@@ -523,6 +541,8 @@ export interface AgentFamilyReadingDenyCodes {
   readonly s3api: never;
   readonly fsquery: never;
   readonly snmpget: never;
+  readonly netconfrpc: never;
+  readonly modbusread: never;
 }
 
 /** Every pack's reading refusal code: a member of the core's `AgentReadingDenyCode`, declared by its pack. */
@@ -547,6 +567,8 @@ export interface AgentFamilyShortfalls {
   readonly s3api: never;
   readonly fsquery: never;
   readonly snmpget: never;
+  readonly netconfrpc: never;
+  readonly modbusread: never;
 }
 
 /** Every pack's verdict shortfall: a member of the core's `AgentGoalShortfall`, declared by its pack. */
@@ -571,6 +593,8 @@ export interface AgentFamilyVariantRequirements {
   readonly s3api: never;
   readonly fsquery: never;
   readonly snmpget: never;
+  readonly netconfrpc: never;
+  readonly modbusread: never;
 }
 
 /** Every pack's variant requirement: a member of the core's `AgentVariantRequirement`, declared by its pack. */
@@ -629,6 +653,8 @@ export interface AgentFamilyEvidenceEvents {
   readonly s3api: never;
   readonly fsquery: never;
   readonly snmpget: never;
+  readonly netconfrpc: never;
+  readonly modbusread: never;
 }
 
 /** Every pack's evidence event, as the ledger stores it less its timestamp. */
@@ -726,6 +752,12 @@ export interface AgentLanguageClientPack {
      * registered in the manifest does not compile until it says what its hand-over is.
      */
     readonly handoverTerms: (budgets: StatementBudgets) => string;
+    /**
+     * What plan mode says in this language, where the shared plan posture is not true of it. Absent on every language
+     * whose grounding is a schema read of the engine; Modbus's grounding is the register map, which sends the device
+     * nothing, while opening the connection dials it, so "nothing else reaches the database" would be false there.
+     */
+    readonly plan?: () => AgentPosture;
   };
 }
 
@@ -823,6 +855,8 @@ export interface AgentFamilyDialectRows {
   s3api: { client: Record<never, never>; server: Record<never, never> };
   fsquery: { client: Record<never, never>; server: Record<never, never> };
   snmpget: { client: Record<never, never>; server: Record<never, never> };
+  netconfrpc: { client: Record<never, never>; server: Record<never, never> };
+  modbusread: { client: Record<never, never>; server: Record<never, never> };
 }
 
 /** The dialect-bound members of each family, client and server. */
