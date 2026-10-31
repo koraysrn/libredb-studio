@@ -224,6 +224,31 @@ describe("the standalone AI routes fence database content", () => {
     expectFencedOnce(captured().messages, HOSTILE);
   });
 
+  test("explain keeps a hostile explainPlan only between the fence markers", async () => {
+    const req = createMockRequest("/api/ai/explain", {
+      method: "POST",
+      body: {
+        query: "SELECT 1",
+        explainPlan: { "Node Type": "Seq Scan", "Relation Name": HOSTILE },
+        databaseType: "postgres",
+      },
+    });
+    const res = await explainRoute.POST(req as never);
+    expect(res.status).toBe(200);
+
+    // The query is fenced before the plan, so the plan sits in the second envelope:
+    // check the markers around its one occurrence rather than the first pair.
+    const joined = captured()
+      .messages.map((m) => m.content)
+      .join("\n");
+    expect(joined.split(HOSTILE).length - 1).toBe(1);
+    const at = joined.indexOf(HOSTILE);
+    const begin = joined.lastIndexOf(UNTRUSTED_CONTENT_BEGIN, at);
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(joined.lastIndexOf(UNTRUSTED_CONTENT_END, at)).toBeLessThan(begin);
+    expect(joined.indexOf(UNTRUSTED_CONTENT_END, at)).toBeGreaterThan(at);
+  });
+
   test("query-safety keeps a hostile schemaContext only between the fence markers", async () => {
     const req = createMockRequest("/api/ai/query-safety", {
       method: "POST",
